@@ -58,7 +58,7 @@ jobs:
             -ExpectedSdkMinVersion $manifest.sdk.minVersion `
             -ManifestSchemaPath schema/plugin.schema.json
           Pop-Location
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: kpa1500-package
           path: artifacts/**/*.zip*
