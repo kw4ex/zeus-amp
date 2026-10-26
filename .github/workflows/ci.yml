@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: Build, test and package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # only used to attach the ZIP to a tagged release
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: dotnet build Zeus.Kpa1500.slnx -c Release --nologo
+      - name: Lock file is current
+        shell: bash
+        run: git diff --exit-code -- src/Kpa1500/packages.lock.json
+      - name: Tests (fake KPA1500 over loopback UDP, no hardware)
+        run: dotnet run --project tests/Kpa1500.Tests -c Release --no-build
+
+  package:
+    needs: test
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Package
+        shell: pwsh
+        run: ./src/Kpa1500/build-package.ps1 -ManagedDependency System.IO.Ports.dll
+      - name: Validate with the Zeus catalog tools
+        shell: pwsh
+        run: |
+          $manifest = Get-Content src/Kpa1500/plugin.json -Raw | ConvertFrom-Json
+          git clone --depth 1 https://github.com/Zeus-SDR/zeus-community-features "$env:RUNNER_TEMP/zeus"
+          $zip = Resolve-Path "artifacts/$($manifest.id)/$($manifest.id)-$($manifest.version).zip"
+          Push-Location "$env:RUNNER_TEMP/zeus"
+          ./tools/validate-package.ps1 `
+            -PackagePath $zip `
+            -ExpectedId $manifest.id `
+            -ExpectedVersion $manifest.version `
+            -ExpectedSdkAbi $manifest.sdk.abi `
+            -ExpectedSdkMinVersion $manifest.sdk.minVersion `
+            -ManifestSchemaPath schema/plugin.schema.json
+          Pop-Location
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kpa1500-package
+          path: artifacts/**/*.zip*
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem artifacts -Recurse -Include *.zip,*.sha256 | ForEach-Object FullName
+          gh release create "${{ github.ref_name }}" $files --title "${{ github.ref_name }}" --notes "KPA1500 Zeus feature ${{ github.ref_name }}" 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release upload "${{ github.ref_name }}" $files --clobber }

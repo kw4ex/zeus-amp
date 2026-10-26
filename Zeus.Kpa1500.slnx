@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="sdk/Zeussdr.Zeus.Plugins.Contracts/Zeus.Plugins.Contracts.csproj" />
+  <Project Path="src/Kpa1500/Zeus.Community.Kpa1500.csproj" />
+  <Project Path="tests/Kpa1500.Tests/Kpa1500.Tests.csproj" />
+</Solution>

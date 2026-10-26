@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "dotnet": {
+    "project": "src/Kpa1500/Zeus.Community.Kpa1500.csproj",
+    "configuration": "Release"
+  },
+  "package": {
+    "plugin.json": "src/Kpa1500/plugin.json",
+    "README.md": "src/Kpa1500/README.md",
+    "LICENSE": "LICENSE",
+    "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+    "ui/kpa1500.es.js": "src/Kpa1500/ui/kpa1500.es.js"
+  }
+}

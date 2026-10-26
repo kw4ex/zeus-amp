@@ -1,0 +1,7 @@
+bin/
+obj/
+artifacts/
+.zeus-build/
+*.user
+.vs/
+build-log.txt
