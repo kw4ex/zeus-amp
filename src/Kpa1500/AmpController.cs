@@ -82,6 +82,7 @@ public sealed class AmpController : IAsyncDisposable
     private const int MinPassGapMs = 60;
     private static readonly string[] FastRotation = { "TP", "FL", "FR" };
     private long _lastCycleTicks;
+    private int _txStateQueries;
     private volatile bool _frFresh;
     private int _foreignFreqHits;
     private DateTime _otherControllerAt = DateTime.MinValue;
@@ -267,7 +268,13 @@ public sealed class AmpController : IAsyncDisposable
     }
 
     private void OnFrequency(long hz) { Interlocked.Exchange(ref _radioHz, hz); Wake(); }
-    private void OnMox(bool tx) { _radioMox = tx; Wake(); }
+    private void OnMox(bool tx)
+    {
+        _radioMox = tx;
+        // Zeus reports TUNE and MOX alike here; ask TCI which one it is.
+        _tci?.QueryTxState();
+        Wake();
+    }
     private void OnMode(string mode) { _radioMode = mode ?? ""; Wake(); }
 
     private void Wake()
@@ -306,7 +313,12 @@ public sealed class AmpController : IAsyncDisposable
     }
 
     // Zeus's TCI "trx" covers MOX only; its TUNE carrier shows up as "tune".
-    private bool TxLocked() => _radioMox || (_tci?.Trx ?? false) || (_tci?.Tune ?? false) || (_state.ForwardW ?? 0) >= RfPresentWatts;
+    private bool TxLocked() => _radioMox || ((_tci?.Trx ?? false) && (_radio is null || _radioMox)) || TciTune || (_state.ForwardW ?? 0) >= RfPresentWatts;
+
+    // Zeus's TCI answers "tune" only when asked and never says when it ends, so a
+    // TCI "tune: true" counts only while Zeus itself still reports transmitting
+    // (when Zeus's radio state is available to this feature).
+    private bool TciTune => (_tci?.Tune ?? false) && (_radio is null || _radioMox);
 
     private bool RelayBusy(out string why)
     {
@@ -320,7 +332,7 @@ public sealed class AmpController : IAsyncDisposable
     }
 
     private bool TuneSignal(PluginConfig cfg) =>
-        (cfg.TciEnabled && (_tci?.Tune ?? false)) ||
+        (cfg.TciEnabled && TciTune) ||
         (cfg.AutoTuneDetect && TuneGuard.IsTuneMode(_radioMode));
 
     // ── poll loop ───────────────────────────────────────────────────────────
@@ -437,6 +449,10 @@ public sealed class AmpController : IAsyncDisposable
     {
         _cycle++;
         _lastCycleTicks = Environment.TickCount64;
+        // While Zeus transmits, keep asking TCI whether it's TUNE for the first
+        // couple of seconds (the first answer can race the key-up).
+        if (_radioMox && !(_tci?.Tune ?? false) && _txStateQueries < 12) { _txStateQueries++; _tci?.QueryTxState(); }
+        else if (!_radioMox) _txStateQueries = 0;
         // Keep the amp's network load light (≈5 queries per pass, like the
         // Thetis bridge's one-command-per-tick): ON every 4th pass while on.
         bool wasOn;
@@ -887,7 +903,7 @@ public sealed class AmpController : IAsyncDisposable
             // Read the mode fresh, as the bridge did, so the restore decision is right.
             var os = await Q(link, "OS", ct).ConfigureAwait(false);
             var prior = os is null ? (bool?)null : KpaProtocol.Bool01(os);
-            var src = cfg.TciEnabled && (_tci?.Tune ?? false) ? "tci" : "mode";
+            var src = cfg.TciEnabled && TciTune ? "tci" : "mode";
             lock (_gate)
             {
                 if (prior is not null) _state.Operate = prior;

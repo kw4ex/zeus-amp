@@ -28,6 +28,8 @@ public sealed class TciClient : IAsyncDisposable
     private readonly Task _loop;
 
     private volatile bool _connected;
+    private volatile ClientWebSocket? _ws;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     /// <summary>Tests only: pretend the TCI socket is up.</summary>
     internal void TestSetConnected(bool on) => _connected = on;
     private volatile bool _tune;
@@ -141,6 +143,7 @@ public sealed class TciClient : IAsyncDisposable
                     await ws.ConnectAsync(new Uri($"ws://{_host}:{_port}/"), cts.Token).ConfigureAwait(false);
                 }
                 _connected = true;
+                _ws = ws;
                 warned = false;
                 LastError = "";
                 _levelChannel = int.MaxValue;
@@ -174,6 +177,7 @@ public sealed class TciClient : IAsyncDisposable
                 Changed?.Invoke();
             }
 
+            _ws = null;
             if (_connected)
             {
                 _connected = false;
@@ -269,6 +273,30 @@ public sealed class TciClient : IAsyncDisposable
             else if (name == "split_enable" && flag != _split) { _split = flag; changed = true; }
         }
         if (changed) Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Ask Zeus whether TUNE / MOX is on. Zeus's TCI never announces a TUNE
+    /// press by itself — it only answers this question — so the controller asks
+    /// whenever Zeus reports that transmit started or stopped, and while it lasts.
+    /// Fire-and-forget; the answer arrives as an ordinary "tune:" / "trx:" message.
+    /// </summary>
+    public void QueryTxState()
+    {
+        var ws = _ws;
+        if (ws is null || !_connected) return;
+        _ = Task.Run(async () =>
+        {
+            if (!await _sendLock.WaitAsync(500).ConfigureAwait(false)) return;
+            try
+            {
+                if (ws.State != WebSocketState.Open) return;
+                var q = Encoding.ASCII.GetBytes($"tune:{_rx};trx:{_rx};");
+                await ws.SendAsync(new ArraySegment<byte>(q), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch { /* the receive loop notices a dead socket */ }
+            finally { _sendLock.Release(); }
+        });
     }
 
     public async ValueTask DisposeAsync()

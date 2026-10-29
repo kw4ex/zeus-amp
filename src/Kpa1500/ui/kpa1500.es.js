@@ -348,7 +348,7 @@ function makePanel(callBackend) {
       // On/off switch, like the Thetis bridge: lit = whenever TUNE is pressed in
       // Zeus the amp goes to STANDBY, and back to OPERATE when TUNE ends.
       tunestby: () => cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", sotOn, {
-        variant: "litamber", disabled: busy,
+        disabled: busy,   // lit blue like OPERATE when on
         title: (sotOn
           ? "Standby on Tune is ON: pressing TUNE in Zeus puts the amp in STANDBY, and OPERATE returns afterwards. Click to turn it off."
           : "Standby on Tune is OFF. Click to turn it on.") +

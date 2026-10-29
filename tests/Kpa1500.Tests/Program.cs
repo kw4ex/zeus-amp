@@ -216,6 +216,32 @@ using (var amp = new FakeAmp())
     Check("never keyed: no MOX command exists", !amp.Received.Any(c => c.StartsWith("TX") || c.StartsWith("^TX")));
 }
 
+Console.WriteLine("Standby-on-Tune with a Zeus-like TCI (answers only when asked)");
+using (var amp = new FakeAmp())
+using (var zt = new FakeTci())
+{
+    var radio = new FakeRadio();
+    await using var ctl = new AmpController(NullLogger.Instance, new EventLog(500));
+    ctl.AttachRadio(radio);
+    ctl.Start(PluginConfig.Sanitize(new PluginConfig
+    {
+        Host = "127.0.0.1", NetPort = amp.Port, PollMs = 50,
+        TciEnabled = true, TciHost = "localhost", TciPort = zt.Port, AutoTuneDetect = false, StandbyOnTune = true,
+    }));
+    Check("TCI connected, amp in OPERATE", await WaitFor(() => ctl.Tci.Connected && ctl.State.Operate == true, 8));
+    radio.SetMox(true);              // voice transmit: Zeus says TUNE is off
+    await Task.Delay(700);
+    Check("voice MOX leaves the amp in OPERATE", amp.Mode == 1 && zt.TuneQueries > 0);
+    radio.SetMox(false);
+    await Task.Delay(400);
+    zt.TunOn = true;                 // Zeus TUNE pressed: only MoxChanged fires
+    radio.SetMox(true);
+    Check("Zeus TUNE → amp STANDBY (asked TCI)", await WaitFor(() => amp.Mode == 0, 4));
+    zt.TunOn = false;
+    radio.SetMox(false);
+    Check("TUNE released → OPERATE restored", await WaitFor(() => amp.Mode == 1, 5));
+}
+
 Console.WriteLine("TCI parsing");
 {
     var notes = new List<string>();
