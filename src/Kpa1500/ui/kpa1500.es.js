@@ -278,16 +278,45 @@ function makePanel(callBackend) {
     const hasTarget = cfg.transport === "serial" ? !!(cfg.serialPort || "").trim() : !!(cfg.host || "").trim();
     const tci = status.tci || { enabled: false };
 
+    // ── top-line buttons ──
+    // Every two-state control is one toggle that is filled (lit) when active.
+    // Pairs/sets (ANT 1/2, bands) light the active one and fade the others.
+    // Dashed outline = locked (transmitting / tuning / amp off), never "inactive".
+    const toggle = (key, label, lit, opts) => h("button", { key, type: "button",
+      className: c("b " + (opts.variant || "") + (opts.faint ? " faint" : "")),
+      "aria-pressed": !!lit, disabled: !!opts.disabled, title: opts.title, onClick: opts.onClick }, label);
+
+    const ampBtns = [];
+    if (cfg.ctlPower) {
+      ampBtns.push(toggle("pw", amp.powerOnInProgress ? "WAKING…" : "POWER", on || amp.powerOnInProgress, {
+        variant: "litok",
+        disabled: !connected || busy || amp.powerOnInProgress || (on && (tx || tuning)),
+        title: on ? (tx ? "Not while transmitting" : "Amplifier is ON — click to turn it off") : "Amplifier is off — click to turn it on",
+        onClick: () => {
+          const want = on ? "off" : "on";
+          if ((want === "off" && cfg.confirmPowerOff) || (want === "on" && cfg.confirmPowerOn)) setConfirm(want);
+          else act("/power", { on: want === "on" });
+        } }));
+    }
+    if (cfg.ctlOperate) {
+      const operating = on && amp.operate === true;
+      ampBtns.push(toggle("op", "OPERATE", operating, {
+        // Going to STANDBY is always allowed (even under RF); going to OPERATE is locked under RF.
+        disabled: operating ? (!on || busy) : relayLock,
+        title: !on ? "Amplifier is off" : operating ? "In OPERATE — click for STANDBY" : (lockTip || "In STANDBY — click for OPERATE"),
+        onClick: () => act("/operate", { operate: !operating }) }));
+    }
+
     // ── header ──
     const pills = [];
     if (!connected) pills.push(h("span", { key: "c", className: c("pill " + (conn.state === "opening" ? "warn" : "")) },
       conn.state === "opening" ? "OPENING" : "OFFLINE"));
-    if (connected) pills.push(h("span", { key: "p", className: c("pill " + (on ? "ok" : amp.power === "off" ? "" : "warn")) },
+    if (connected && !cfg.ctlPower) pills.push(h("span", { key: "p", className: c("pill " + (on ? "ok" : amp.power === "off" ? "" : "warn")) },
       amp.powerOnInProgress ? "WAKING…" : on ? "ON" : amp.power === "off" ? "OFF" : "NO REPLY"));
     if (tci.enabled) pills.push(h("span", { key: "tci", className: c("pill " + (tci.connected ? "ok" : "warn")),
       title: tci.connected ? "TCI connected to Zeus at " + tci.target : "TCI not connected: " + (tci.error || "connecting to " + tci.target) },
       tci.connected ? (tci.tune ? "TCI TUNE" : "TCI") : "TCI WAIT"));
-    if (on && amp.operate != null) pills.push(h("span", { key: "o", className: c("pill " + (amp.operate ? "acc" : "")) }, amp.operate ? "OPERATE" : "STANDBY"));
+    if (on && amp.operate != null && !cfg.ctlOperate) pills.push(h("span", { key: "o", className: c("pill " + (amp.operate ? "acc" : "")) }, amp.operate ? "OPERATE" : "STANDBY"));
     if (tx) pills.push(h("span", { key: "t", className: c("pill tx") }, "TX"));
     if (tuning) pills.push(h("span", { key: "u", className: c("pill warn") }, "ATU TUNING"));
     if (fault) pills.push(h("span", { key: "f", className: c("pill tx") }, "FAULT " + fault.code));
@@ -300,7 +329,7 @@ function makePanel(callBackend) {
           (amp.firmware ? " · fw " + amp.firmware : "") +
           (amp.band ? " · " + amp.band : "") +
           (on && amp.antenna ? " · ANT" + amp.antenna : ""))),
-      h("div", { className: c("row") }, pills,
+      h("div", { className: c("row") }, pills, ampBtns,
         h("button", { className: c("b icon"), type: "button", "aria-label": "Settings", title: "Settings", onClick: openSettings }, "⚙")));
 
     const banners = [];
@@ -421,44 +450,7 @@ function makePanel(callBackend) {
       tiles.length ? h("div", { className: c("tiles") }, tiles) : null) : null;
 
     // ── controls ──
-    // Every two-state control is one toggle that is filled (lit) when active.
-    // Pairs/sets (ANT 1/2, bands) light the active one and fade the others.
-    // Dashed outline = locked (transmitting / tuning / amp off), never "inactive".
-    const toggle = (key, label, lit, opts) => h("button", { key, type: "button",
-      className: c("b " + (opts.variant || "") + (opts.faint ? " faint" : "")),
-      "aria-pressed": !!lit, disabled: !!opts.disabled, title: opts.title, onClick: opts.onClick }, label);
-
-    const ampBtns = [];
-    if (cfg.ctlPower) {
-      ampBtns.push(toggle("pw", amp.powerOnInProgress ? "WAKING…" : "POWER", on || amp.powerOnInProgress, {
-        variant: "litok",
-        disabled: !connected || busy || amp.powerOnInProgress || (on && (tx || tuning)),
-        title: on ? (tx ? "Not while transmitting" : "Amplifier is ON — click to turn it off") : "Amplifier is off — click to turn it on",
-        onClick: () => {
-          const want = on ? "off" : "on";
-          if ((want === "off" && cfg.confirmPowerOff) || (want === "on" && cfg.confirmPowerOn)) setConfirm(want);
-          else act("/power", { on: want === "on" });
-        } }));
-    }
-    if (cfg.ctlOperate) {
-      const operating = on && amp.operate === true;
-      ampBtns.push(toggle("op", "OPERATE", operating, {
-        // Going to STANDBY is always allowed (even under RF); going to OPERATE is locked under RF.
-        disabled: operating ? (!on || busy) : relayLock,
-        title: !on ? "Amplifier is off" : operating ? "In OPERATE — click for STANDBY" : (lockTip || "In STANDBY — click for OPERATE"),
-        onClick: () => act("/operate", { operate: !operating }) }));
-    }
-    if (cfg.standbyOnTune && cfg.ctlTuneGuard) {
-      const armed = guard.phase !== "idle";
-      ampBtns.push(toggle("tg", "TUNE STBY", armed, {
-        variant: "litamber", disabled: !on || busy,
-        title: armed ? "Standby-on-Tune armed — click to cancel" : "Click, then press TUNE on the radio: the amp goes to STANDBY for the tune and back to OPERATE after",
-        onClick: () => act("/tune-guard", { arm: !armed }) }));
-    }
-
     const groups = [];
-    if (ampBtns.length) groups.push(h("div", { key: "a", className: c("group") },
-      h("div", { className: c("glab") }, "Amplifier"), h("div", { className: c("btns") }, ampBtns)));
 
     if (cfg.ctlBand) {
       const radioText = status.radio && status.radio.available && status.radio.band
@@ -477,7 +469,8 @@ function makePanel(callBackend) {
         h("div", { className: c("muted") }, radioText)));
     }
 
-    if (cfg.ctlAntenna || cfg.ctlAtu || cfg.ctlTune) {
+    const showGuardBtn = cfg.standbyOnTune && cfg.ctlTuneGuard;
+    if (cfg.ctlAntenna || cfg.ctlAtu || cfg.ctlTune || showGuardBtn) {
       const atuBtns = [];
       if (cfg.ctlAntenna) [1, 2].forEach((a) => {
         const active = on && amp.antenna === a;
@@ -498,6 +491,13 @@ function makePanel(callBackend) {
         disabled: tuning ? busy : relayLock,
         title: tuning ? "ATU is tuning — click to cancel" : (lockTip || "Start a full-search ATU tune (you supply the carrier)"),
         onClick: () => tuning ? act("/atu/cancel") : setConfirm("tune") }));
+      if (showGuardBtn) {
+        const armed = guard.phase !== "idle";
+        atuBtns.push(toggle("tg", "TUNE STBY", armed, {
+          variant: "litamber", disabled: !on || busy,
+          title: armed ? "Standby-on-Tune armed — click to cancel" : "Click, then press TUNE on the radio: the amp goes to STANDBY for the tune and back to OPERATE after",
+          onClick: () => act("/tune-guard", { arm: !armed }) }));
+      }
       groups.push(h("div", { key: "t", className: c("group") },
         h("div", { className: c("glab") }, "Antenna & ATU"), h("div", { className: c("btns") }, atuBtns)));
     }

@@ -28,6 +28,8 @@ public sealed class TciClient : IAsyncDisposable
     private readonly Task _loop;
 
     private volatile bool _connected;
+    /// <summary>Tests only: pretend the TCI socket is up.</summary>
+    internal void TestSetConnected(bool on) => _connected = on;
     private volatile bool _tune;
     private volatile bool _trx;
     private volatile bool _split;
@@ -82,7 +84,9 @@ public sealed class TciClient : IAsyncDisposable
     {
         get
         {
-            if (!_connected || !_trx) return null;
+            // Zeus's trx flag covers MOX only; TUNE raises "tune" instead. Zeus
+            // sends 0 W when not keyed, so a fresh non-zero value is enough.
+            if (!_connected) return null;
             var age = Environment.TickCount64 - Interlocked.Read(ref _radioFwdTicks);
             return age > 1500 ? null : BitConverter.Int64BitsToDouble(Interlocked.Read(ref _radioFwdBits));
         }
@@ -195,6 +199,17 @@ public sealed class TciClient : IAsyncDisposable
             if (colon < 0) continue;
             var name = tok[..colon].Trim().ToLowerInvariant();
             var args = tok[(colon + 1)..].Split(',');
+            if (name is "tx_power" or "tx_forward_power")
+            {
+                // tx_power:<watts> — Zeus broadcasts this to every client; backup
+                // for tx_sensors.
+                if (args.Length == 1 && double.TryParse(args[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var pw))
+                {
+                    Interlocked.Exchange(ref _radioFwdBits, BitConverter.DoubleToInt64Bits(Math.Max(0, pw)));
+                    Interlocked.Exchange(ref _radioFwdTicks, Environment.TickCount64);
+                }
+                continue;
+            }
             if (args.Length < 2) continue;
             if (!int.TryParse(args[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var rx) || rx != _rx) continue;
             if (name is "tx_sensors" or "tx_sensor")
