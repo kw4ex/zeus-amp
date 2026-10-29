@@ -296,7 +296,7 @@ function makePanel(callBackend) {
       h("div", { className: c("grow") },
         h("div", { className: c("title") }, "Elecraft KPA1500"),
         h("div", { className: c("sub") },
-          "v" + (status.version || "?") + " · " + (conn.target || "no connection set") +
+          "KW4EX v" + (status.version || "?") + " · " + (conn.target || "no connection set") +
           (amp.firmware ? " · fw " + amp.firmware : "") +
           (amp.band ? " · " + amp.band : "") +
           (on && amp.antenna ? " · ANT" + amp.antenna : ""))),
