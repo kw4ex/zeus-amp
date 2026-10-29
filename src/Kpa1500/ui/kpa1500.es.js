@@ -347,12 +347,12 @@ function makePanel(callBackend) {
         onClick: () => act("/operate", { operate: !operating }) })],
       // On/off switch, like the Thetis bridge: lit = whenever TUNE is pressed in
       // Zeus the amp goes to STANDBY, and back to OPERATE when TUNE ends.
-      tunestby: () => cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", sotOn, {
+      tunestby: () => cfg.ctlTuneGuard && [toggle("tg", sotOn && !(tci.enabled && tci.connected) ? "TUNE STBY ⚠" : "TUNE STBY", sotOn, {
         disabled: busy,   // lit blue like OPERATE when on
         title: (sotOn
           ? "Standby on Tune is ON: pressing TUNE in Zeus puts the amp in STANDBY, and OPERATE returns afterwards. Click to turn it off."
           : "Standby on Tune is OFF. Click to turn it on.") +
-          (sotOn && !(tci.enabled && tci.connected) && !cfg.autoTuneDetect ? " (Needs Zeus TCI connected — see Settings.)" : ""),
+          (sotOn && !(tci.enabled && tci.connected) ? " ⚠ Not working yet: Zeus TCI isn't connected (" + (tci.error || "turn TCI on in Zeus, port 40001") + ")." : ""),
         onClick: async () => {
           await act("/tune-guard/enable", { on: !sotOn });
           try { const x = await call(callBackend, "GET", "/config"); if (x) setCfgSaved(x); } catch (e) { /* keep */ }

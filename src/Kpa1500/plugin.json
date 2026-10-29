@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "com.kw4ex.zeus.kpa1500",
   "name": "Elecraft KPA1500",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "author": "KW4EX",
   "description": "Control and telemetry for the Elecraft KPA1500 amplifier and its built-in ATU over UDP or serial: power, operate/standby, band, antenna, ATU, Standby-on-Tune, VFO tracking, Wake-on-LAN, discovery and a no-antenna warning.",
   "homepage": "https://github.com/kw4ex/zeus-amp",

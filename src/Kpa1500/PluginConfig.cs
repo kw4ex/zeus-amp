@@ -174,6 +174,9 @@ public sealed class PluginConfig
         c.SwrWarn = double.IsNaN(c.SwrWarn) ? d.SwrWarn : Math.Clamp(c.SwrWarn, 1.1, 10);
         c.TempWarnC = Math.Clamp(c.TempWarnC, 30, 100);
         c.ControlOrder = NormalizeControlOrder(c.ControlOrder);
+        // Zeus only says a transmission is TUNE (not talk) over TCI, so
+        // Standby-on-Tune always needs it.
+        if (c.StandbyOnTune) c.TciEnabled = true;
         return c;
     }
 }

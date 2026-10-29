@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Zeus.Community.Kpa1500</AssemblyName>
     <RootNamespace>Zeus.Community.Kpa1500</RootNamespace>
-    <Version>1.1.8</Version>
+    <Version>1.1.9</Version>
     <IsPackable>false</IsPackable>
     <!-- Bundle System.IO.Ports beside the plugin for the USB connection
          (packaged with -ManagedDependency System.IO.Ports.dll). -->

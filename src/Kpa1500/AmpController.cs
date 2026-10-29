@@ -83,6 +83,7 @@ public sealed class AmpController : IAsyncDisposable
     private static readonly string[] FastRotation = { "TP", "FL", "FR" };
     private long _lastCycleTicks;
     private int _txStateQueries;
+    private DateTime _noTciWarnAt = DateTime.MinValue;
     private volatile bool _frFresh;
     private int _foreignFreqHits;
     private DateTime _otherControllerAt = DateTime.MinValue;
@@ -273,6 +274,12 @@ public sealed class AmpController : IAsyncDisposable
         _radioMox = tx;
         // Zeus reports TUNE and MOX alike here; ask TCI which one it is.
         _tci?.QueryTxState();
+        if (tx && _cfg.StandbyOnTune && !(_tci?.Connected ?? false) && DateTime.UtcNow - _noTciWarnAt > TimeSpan.FromMinutes(5))
+        {
+            _noTciWarnAt = DateTime.UtcNow;
+            Note("warn", "TUNE STBY is on, but Zeus TCI isn't connected, so a TUNE can't be told apart from talking. " +
+                         "Turn TCI on in Zeus's settings (port 40001) — see the TCI line in this panel's Settings.");
+        }
         Wake();
     }
     private void OnMode(string mode) { _radioMode = mode ?? ""; Wake(); }
