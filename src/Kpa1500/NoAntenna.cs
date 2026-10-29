@@ -183,7 +183,7 @@ public sealed class NoAntennaMonitor
             if (AutoLearn && Enabled && !_low && now - _lastAutoStep >= AutoStep)
             {
                 _lastAutoStep = now;
-                changed = AutoLearnStepLocked(_band, med, now);
+                changed = AutoLearnStepLocked(_band, med.Value, now);
             }
         }
         if (changed) LimitsChanged?.Invoke();

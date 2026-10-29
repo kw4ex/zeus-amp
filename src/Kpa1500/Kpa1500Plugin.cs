@@ -53,8 +53,8 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
         // settings save can never overwrite freshly learned values.
         try
         {
-            var stored = await context.Settings.GetAsync<Dictionary<string, BandNoise>>(NoAntKey, ct).ConfigureAwait(false);
-            _amp.NoAntenna.Load(stored);
+            var storedLimits = await context.Settings.GetAsync<Dictionary<string, BandNoise>>(NoAntKey, ct).ConfigureAwait(false);
+            _amp.NoAntenna.Load(storedLimits);
         }
         catch (Exception ex) { context.Logger.LogWarning(ex, "KPA1500 no-antenna limits unreadable; using defaults"); }
         _noAntSave = new Timer(_ => _ = SaveNoAntAsync(), null, Timeout.Infinite, Timeout.Infinite);

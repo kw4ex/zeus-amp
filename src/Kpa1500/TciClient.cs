@@ -147,11 +147,11 @@ public sealed class TciClient : IAsyncDisposable
                 // rx_smeter:rx,channel,dBm   (Zeus broadcasts this to every client)
                 if (args.Length < 3 || !int.TryParse(args[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ch) || ch != 0)
                     continue;
-                string? raw = null;
-                if (name == "rx_channel_sensors_ex" && args.Length >= 4) { _sensorsEx = true; raw = args[3]; }
-                else if (name == "rx_channel_sensors" && !_sensorsEx) raw = args[2];
-                else if (name == "rx_smeter" && !_sensorsEx) raw = args[2];
-                if (raw is not null && double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dbm))
+                string? level = null;
+                if (name == "rx_channel_sensors_ex" && args.Length >= 4) { _sensorsEx = true; level = args[3]; }
+                else if (name == "rx_channel_sensors" && !_sensorsEx) level = args[2];
+                else if (name == "rx_smeter" && !_sensorsEx) level = args[2];
+                if (level is not null && double.TryParse(level.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dbm))
                     RxLevel?.Invoke(dbm);
                 continue;
             }
