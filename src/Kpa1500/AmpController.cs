@@ -79,6 +79,14 @@ public sealed class AmpController : IAsyncDisposable
 {
     /// <summary>Forward power at or above this counts as RF present (bridge: fwd &gt; 5 W).</summary>
     public const int RfPresentWatts = 6;
+    private const int MinPassGapMs = 60;
+    private static readonly string[] FastRotation = { "TP", "FL", "FR" };
+    private long _lastCycleTicks;
+    private volatile bool _frFresh;
+    private int _foreignFreqHits;
+    private DateTime _otherControllerAt = DateTime.MinValue;
+    /// <summary>True while another program has recently been moving the amp's frequency.</summary>
+    public bool OtherController => DateTime.UtcNow - _otherControllerAt < TimeSpan.FromSeconds(60);
 
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(3);
@@ -276,13 +284,13 @@ public sealed class AmpController : IAsyncDisposable
     public bool RadioMox => _radioMox;
     public string RadioMode => _radioMode;
     public int PendingBand => _bandPending;
-    public (bool Enabled, bool Connected, bool Tune, string Target, string Error, long Levels, double? LastLevel, int? LevelChannel) Tci
+    public (bool Enabled, bool Connected, bool Tune, string Target, string Error, long Levels, double? LastLevel, int? LevelChannel, long PowerReports) Tci
     {
         get
         {
             var t = _tci;
-            return t is null ? (false, false, false, "", "", 0, null, null)
-                : (true, t.Connected, t.Tune, t.Target, t.LastError, t.LevelCount, t.LastLevel, t.LevelChannel);
+            return t is null ? (false, false, false, "", "", 0, null, null, 0)
+                : (true, t.Connected, t.Tune, t.Target, t.LastError, t.LevelCount, t.LastLevel, t.LevelChannel, t.PowerCount);
         }
     }
 
@@ -297,7 +305,8 @@ public sealed class AmpController : IAsyncDisposable
         get { lock (_gate) return TxLocked(); }
     }
 
-    private bool TxLocked() => _radioMox || (_tci?.Trx ?? false) || (_state.ForwardW ?? 0) >= RfPresentWatts;
+    // Zeus's TCI "trx" covers MOX only; its TUNE carrier shows up as "tune".
+    private bool TxLocked() => _radioMox || (_tci?.Trx ?? false) || (_tci?.Tune ?? false) || (_state.ForwardW ?? 0) >= RfPresentWatts;
 
     private bool RelayBusy(out string why)
     {
@@ -347,7 +356,14 @@ public sealed class AmpController : IAsyncDisposable
                 await DropLinkAsync(ex.Message).ConfigureAwait(false);
             }
 
-            try { await _wake.WaitAsync(delay, ct).ConfigureAwait(false); }
+            try
+            {
+                await _wake.WaitAsync(delay, ct).ConfigureAwait(false);
+                // A burst of wake-ups (VFO knob, TCI chatter) must not turn into a
+                // burst of amp queries: keep passes at least MinPassGapMs apart.
+                var since = Environment.TickCount64 - _lastCycleTicks;
+                if (since < MinPassGapMs) await Task.Delay((int)(MinPassGapMs - since), ct).ConfigureAwait(false);
+            }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -420,7 +436,12 @@ public sealed class AmpController : IAsyncDisposable
     private async Task<int> CycleAsync(KpaLink link, PluginConfig cfg, CancellationToken ct)
     {
         _cycle++;
-        var on = await Q(link, "ON", ct).ConfigureAwait(false);
+        _lastCycleTicks = Environment.TickCount64;
+        // Keep the amp's network load light (≈5 queries per pass, like the
+        // Thetis bridge's one-command-per-tick): ON every 4th pass while on.
+        bool wasOn;
+        lock (_gate) wasOn = _state.Power == "on";
+        var on = (wasOn && _cycle % 4 != 0) ? "1" : await Q(link, "ON", ct).ConfigureAwait(false);
         var power = KpaProtocol.Bool01(on ?? "");
         if (power != true)
         {
@@ -457,9 +478,12 @@ public sealed class AmpController : IAsyncDisposable
 
         var ws = await Q(link, "WS", ct).ConfigureAwait(false);
         var os = await Q(link, "OS", ct).ConfigureAwait(false);
-        var fl = await Q(link, "FL", ct).ConfigureAwait(false);
-        var tp = await Q(link, "TP", ct).ConfigureAwait(false);
-        var fr = await Q(link, "FR", ct).ConfigureAwait(false);
+        // Fault, tuner-busy and frequency take turns (each ≈ every 3rd pass).
+        var turn = FastRotation[_cycle % FastRotation.Length];
+        var turnVal = await Q(link, turn, ct).ConfigureAwait(false);
+        var fl = turn == "FL" ? turnVal : null;
+        var tp = turn == "TP" ? turnVal : null;
+        var fr = turn == "FR" ? turnVal : null;
         var meter = ws is null ? null : KpaProtocol.ParseWs(ws);
         // While transmitting, read drive and reflected power on every pass.
         bool txNow;
@@ -468,7 +492,7 @@ public sealed class AmpController : IAsyncDisposable
         var pwrFast = txNow ? await Q(link, "PWR", ct).ConfigureAwait(false) : null;
 
         var slow = new List<(string Cmd, string? Val)>();
-        for (var i = 0; i < 2; i++)
+        for (var i = 0; i < 1; i++)
         {
             var cmd = SlowQueries[_slowIndex];
             _slowIndex = (_slowIndex + 1) % SlowQueries.Length;
@@ -494,7 +518,7 @@ public sealed class AmpController : IAsyncDisposable
             if (os is not null) _state.Operate = KpaProtocol.Bool01(os);
             if (fl is not null) _state.FaultCode = KpaProtocol.ParseFault(fl);
             if (tp is not null) _state.Tuning = KpaProtocol.Bool01(tp);
-            if (fr is not null) _state.AmpFreqKhz = KpaProtocol.Int(fr) is int k and > 0 ? k : null;
+            if (fr is not null) { _state.AmpFreqKhz = KpaProtocol.Int(fr) is int k and > 0 ? k : null; _frFresh = true; }
             if (pwiFast is not null) _state.InputW = KpaProtocol.Int(pwiFast);
             if (pwrFast is not null) _state.ReflectedW = KpaProtocol.Int(pwrFast);
             foreach (var (cmd, val) in slow)
@@ -612,6 +636,29 @@ public sealed class AmpController : IAsyncDisposable
             _bandPending = -1;
         }
 
+        // Another program (e.g. the Thetis bridge) moving the amp away from the
+        // frequency we set: warn, and put ours back.
+        int? ampKhz;
+        lock (_gate) ampKhz = _state.AmpFreqKhz;
+        var fresh = _frFresh;
+        _frFresh = false;
+        if (cfg.SendFrequency && !hold && fresh && _lastFreqSentKhz > 0 && ampKhz is int ak && _lastFreqSentKhz == khz)
+        {
+            if (Math.Abs(ak - _lastFreqSentKhz) > 10)
+            {
+                if (++_foreignFreqHits >= 2)
+                {
+                    if (DateTime.UtcNow - _otherControllerAt > TimeSpan.FromMinutes(5))
+                        Note("warn", $"Another program set the amp to {ak / 1000.0:0.000} MHz (Zeus is on {khz / 1000.0:0.000}). " +
+                                     "Only one program should control the amp — close the Thetis bridge or other control program.");
+                    _otherControllerAt = DateTime.UtcNow;
+                    _foreignFreqHits = 0;
+                    _lastFreqSentKhz = -1;   // resend ours below
+                }
+            }
+            else _foreignFreqHits = 0;
+        }
+
         if (cfg.SendFrequency && !hold &&
             (_lastFreqSentKhz < 0 || Math.Abs(khz - _lastFreqSentKhz) >= cfg.FrequencyStepKhz))
         {
@@ -643,10 +690,13 @@ public sealed class AmpController : IAsyncDisposable
     {
         get
         {
-            int? pin; bool? operate; bool tuning;
-            lock (_gate) { pin = _state.InputW; operate = _state.Operate; tuning = _state.Tuning == true; }
+            int? pin, fwd; bool? operate; bool tuning;
+            lock (_gate) { pin = _state.InputW; fwd = _state.ForwardW; operate = _state.Operate; tuning = _state.Tuning == true; }
             if (operate == true && !tuning && pin is > 0) return (pin, "amp");
             if (_tci?.RadioFwdW is { } r && r > 0) return (Math.Round(r, 1), "radio");
+            // Bypassed (STANDBY or ATU tuning): the radio's power passes straight
+            // through, so the amp's own forward reading IS the drive.
+            if ((operate == false || tuning) && fwd is > 0) return (fwd, "bypass");
             return (pin, pin is null ? "" : "amp");
         }
     }

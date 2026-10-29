@@ -74,6 +74,9 @@ public sealed class TciClient : IAsyncDisposable
 
     private long _radioFwdBits = BitConverter.DoubleToInt64Bits(0);
     private long _radioFwdTicks;
+    private long _powerCount;
+    /// <summary>Transmit-power reports received from Zeus (diagnostics).</summary>
+    public long PowerCount => Interlocked.Read(ref _powerCount);
 
     /// <summary>
     /// The radio's own forward power (W) from TCI tx_sensors, or null when not
@@ -207,6 +210,7 @@ public sealed class TciClient : IAsyncDisposable
                 {
                     Interlocked.Exchange(ref _radioFwdBits, BitConverter.DoubleToInt64Bits(Math.Max(0, pw)));
                     Interlocked.Exchange(ref _radioFwdTicks, Environment.TickCount64);
+                    if (Interlocked.Increment(ref _powerCount) == 1) _note("ok", $"Zeus is sending the radio's transmit power ({name}).");
                 }
                 continue;
             }
@@ -219,6 +223,7 @@ public sealed class TciClient : IAsyncDisposable
                 {
                     Interlocked.Exchange(ref _radioFwdBits, BitConverter.DoubleToInt64Bits(Math.Max(0, fwd)));
                     Interlocked.Exchange(ref _radioFwdTicks, Environment.TickCount64);
+                    if (Interlocked.Increment(ref _powerCount) == 1) _note("ok", $"Zeus is sending the radio's transmit power ({name}).");
                 }
                 continue;
             }

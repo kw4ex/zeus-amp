@@ -27,7 +27,7 @@ public sealed record OnRequest(bool On);
 public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 {
     /// <summary>Keep identical to plugin.json "version".</summary>
-    public const string ManifestVersion = "1.1.6";
+    public const string ManifestVersion = "1.1.7";
     private const string SettingsKey = "config";
 
     private IPluginContext? _ctx;
@@ -165,7 +165,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                 tci = new
                 {
                     enabled = tci.Enabled, connected = tci.Connected, tune = tci.Tune, target = tci.Target, error = tci.Error,
-                    levels = tci.Levels, lastLevel = tci.LastLevel is { } ll ? Math.Round(ll, 1) : (double?)null, levelChannel = tci.LevelChannel,
+                    levels = tci.Levels, lastLevel = tci.LastLevel is { } ll ? Math.Round(ll, 1) : (double?)null, levelChannel = tci.LevelChannel, powerReports = tci.PowerReports,
                 },
                 amp = new
                 {
@@ -213,6 +213,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                 tx = amp.Transmitting,
                 pendingBand = amp.PendingBand >= 0 ? KpaProtocol.BandName(amp.PendingBand) : null,
                 noAnt = NoAntJson(amp),
+                otherController = amp.OtherController,
                 tuneGuard = new
                 {
                     phase = tune.Phase.ToString().ToLowerInvariant(),
@@ -335,6 +336,17 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
             return ToResult(body.On ? amp.StartScan() : amp.StopScan());
         });
 
+        // The panel's TUNE STBY button: a plain on/off switch for Standby-on-Tune.
+        endpoints.MapPost("tune-guard/enable", async (PowerRequest body, CancellationToken ct) =>
+        {
+            if (_amp is not { } amp || _ctx is not { } ctx) return NotReady();
+            var cfg = amp.Config.Clone();
+            cfg.StandbyOnTune = body.On;
+            cfg = PluginConfig.Sanitize(cfg);
+            await ctx.Settings.SetAsync(SettingsKey, cfg, ct).ConfigureAwait(false);
+            amp.ApplyConfig(cfg);
+            return Results.Ok(new { ok = true, message = body.On ? "Standby on Tune is ON." : "Standby on Tune is OFF." });
+        });
         endpoints.MapPost("tune-guard", async (TuneGuardRequest body, CancellationToken ct) =>
         {
             if (_amp is not { } amp) return NotReady();

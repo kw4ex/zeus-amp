@@ -199,7 +199,7 @@ function ControlOrderEditor(draft, setDraft) {
       h("button", { type: "button", className: c("b"), disabled: i === order.length - 1, "aria-label": "Move " + CONTROL_NAMES[id] + " down", onClick: () => move(i, 1) }, "▼"))),
     h("div", { className: c("btns") },
       h("button", { type: "button", className: c("b"), onClick: () => setDraft({ ...draft, controlOrder: CONTROL_IDS.join(",") }) }, "Default order")),
-    draft.standbyOnTune ? null : h("div", { className: c("muted") }, "TUNE STBY only appears when Standby on Tune is ticked above."));
+    null);
 }
 
 function Field(label, id, control) {
@@ -344,10 +344,18 @@ function makePanel(callBackend) {
         disabled: operating ? (!on || busy) : relayLock,
         title: !on ? "Amplifier is off" : operating ? "In OPERATE — click for STANDBY" : (lockTip || "In STANDBY — click for OPERATE"),
         onClick: () => act("/operate", { operate: !operating }) })],
-      tunestby: () => cfg.standbyOnTune && cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", armed, {
-        variant: "litamber", disabled: !on || busy,
-        title: armed ? "Standby-on-Tune armed — click to cancel" : "Click, then press TUNE on the radio: the amp goes to STANDBY for the tune and back to OPERATE after",
-        onClick: () => act("/tune-guard", { arm: !armed }) })],
+      // On/off switch, like the Thetis bridge: lit = whenever TUNE is pressed in
+      // Zeus the amp goes to STANDBY, and back to OPERATE when TUNE ends.
+      tunestby: () => cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", !!cfg.standbyOnTune, {
+        variant: "litamber", disabled: busy,
+        title: (cfg.standbyOnTune
+          ? "Standby on Tune is ON: pressing TUNE in Zeus puts the amp in STANDBY, and OPERATE returns afterwards. Click to turn it off."
+          : "Standby on Tune is OFF. Click to turn it on.") +
+          (cfg.standbyOnTune && !(tci.enabled && tci.connected) && !cfg.autoTuneDetect ? " (Needs Zeus TCI connected — see Settings.)" : ""),
+        onClick: async () => {
+          await act("/tune-guard/enable", { on: !cfg.standbyOnTune });
+          try { const x = await call(callBackend, "GET", "/config"); if (x) setCfgSaved(x); } catch (e) { /* keep */ }
+        } })],
       antenna: () => cfg.ctlAntenna && [1, 2].map((a) => {
         const active = on && amp.antenna === a;
         return toggle("a" + a, "ANT " + a, active, {
@@ -461,13 +469,11 @@ function makePanel(callBackend) {
       banners.push(h("div", { key: "pb", className: c("banner acc"), role: "status" },
         "Band change to " + status.pendingBand + " waits until TX drops."));
     }
-    if (guard.phase !== "idle") {
-      const msg = guard.phase === "armed" ? "Standby-on-Tune armed — press TUNE on the radio."
-        : guard.phase === "active" ? "Tune carrier present — amp held in STANDBY."
-        : "Tune finished — restoring…";
-      banners.push(h("div", { key: "tg", className: c("banner acc"), role: "status" },
-        h("span", { className: c("grow") }, msg, guard.restore ? " OPERATE returns afterwards." : ""),
-        h("button", { className: c("b"), type: "button", onClick: () => act("/tune-guard", { arm: false }) }, "Cancel")));
+    // Standby-on-Tune works silently (no banner): the OPERATE button shows the state.
+    if (status.otherController) {
+      banners.push(h("div", { key: "oc", className: c("banner warn"), role: "alert" },
+        h("span", { className: c("grow") }, h("strong", null, "Another program is also controlling the amp. "),
+          "It keeps changing the amp's frequency. Close the Thetis bridge (or any other control program) — only one program should control the KPA1500.")));
     }
     const na = status.noAnt || { state: "off" };
     if (cfg.noAntEnabled && (na.state === "low" || na.state === "tx")) {
@@ -506,9 +512,9 @@ function makePanel(callBackend) {
       // The amp reads 0 drive while bypassed (STANDBY / ATU tuning); then the
       // radio's own transmit power from TCI is shown, marked "radio".
       const dw = amp.driveW != null ? amp.driveW : amp.inputW;
-      const fromRadio = amp.driveSource === "radio";
-      meters.push(h(Meter, { key: "in", label: fromRadio ? "Drive·rad" : "Drive", value: dw, max: 100,
-        text: dw == null ? "—" : Math.round(dw) + " W" + (fromRadio ? " (radio)" : ""),
+      const src = amp.driveSource === "radio" ? " (radio)" : amp.driveSource === "bypass" ? " (bypass)" : "";
+      meters.push(h(Meter, { key: "in", label: "Drive", value: dw, max: 100,
+        text: dw == null ? "—" : Math.round(dw) + " W" + src,
         level: dw != null && dw > 90 ? "warn" : "" }));
     }
     if (cfg.showDissipation) meters.push(h(Meter, { key: "pd", label: "Diss", value: amp.dissipationW, max: cfg.meterMaxWatts,
@@ -739,7 +745,7 @@ function Settings(p) {
 
     h("div", { className: c("glab") }, "Standby on Tune"),
     h("div", { className: c("checks") },
-      Check(draft, setDraft, "standbyOnTune", "Enable Standby-on-Tune"),
+      Check(draft, setDraft, "standbyOnTune", "Enable Standby-on-Tune (same as the TUNE STBY button)"),
       Check(draft, setDraft, "restoreOperateAfterTune", "Return to OPERATE afterwards"),
       Check(draft, setDraft, "tciEnabled", "Use Zeus TCI for TUNE, split VFO and receive level (like the Thetis bridge)"),
       Check(draft, setDraft, "autoTuneDetect", "Also trigger when Zeus mode reports TUNE")),
@@ -752,11 +758,11 @@ function Settings(p) {
           : p.tciStatus.connected ? "TCI status: connected to Zeus at " + p.tciStatus.target + ". " +
             (p.tciStatus.levels > 0
               ? "Receive level: " + Math.round(p.tciStatus.lastLevel) + " dBm (" + p.tciStatus.levels + " reports, channel " + p.tciStatus.levelChannel + ")."
-              : "Zeus has not sent any receive-level reports yet.")
+              : "Zeus has not sent any receive-level reports yet.") +
+            " Transmit-power reports: " + (p.tciStatus.powerReports || 0) + "."
           : "TCI status: not connected — " + (p.tciStatus.error || "trying " + p.tciStatus.target + "…") +
             ". In Zeus's settings turn TCI on and use the same port here (Zeus's default is 40001)."),
     ] : null,
-    Field("Tune button waits (s)", id("tuneTimeoutS"), numIn("tuneTimeoutS", 5, 120)),
 
     h("div", { className: c("glab") }, "No antenna? check"),
     h("div", { className: c("checks") },

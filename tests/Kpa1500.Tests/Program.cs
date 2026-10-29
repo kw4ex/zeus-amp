@@ -175,6 +175,9 @@ using (var amp = new FakeAmp())
     radio.SetMode("USB");
     Check("TUNE end → OPERATE restored", await WaitFor(() => amp.Mode == 1));
     Check("deferred ^FR sent after unkey", await WaitFor(() => amp.Freq == 14250));
+    amp.Freq = 7100;   // another program moves the amp
+    Check("another controller detected", await WaitFor(() => ctl.OtherController, 6));
+    Check("our frequency put back", await WaitFor(() => amp.Freq == 14250, 6));
 
     // Started in STANDBY → stays in STANDBY.
     amp.Mode = 0;
@@ -184,6 +187,10 @@ using (var amp = new FakeAmp())
     radio.SetMode("USB");
     await Task.Delay(600);
     Check("tune from STANDBY leaves STANDBY", amp.Mode == 0);
+    amp.Fwd = 9;
+    Check("drive in STANDBY = power passing through (bypass)", await WaitFor(() => ctl.Drive is { Watts: 9, Source: "bypass" }));
+    amp.Fwd = 0;
+    await WaitFor(() => ctl.State.ForwardW == 0);
 
     // Controls.
     amp.Mode = 1;
