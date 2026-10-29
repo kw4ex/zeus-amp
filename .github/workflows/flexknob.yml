@@ -175,3 +175,32 @@ jobs:
           Expand-Archive $zip.FullName $dir -Force
           Get-ChildItem $dir | Format-Table Name, Length
           dotnet run --project tools/FlexKnobLoadCheck -c Release -- $dir
+
+  # Keeps every passing build on the "builds" branch under flexknob/<version>
+  # and flexknob/latest, so the ZIPs have a stable download link.
+  publish-builds:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/flexknob')
+    needs: [package, package-unix, load-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dl
+      - name: Commit ZIPs to the builds branch
+        shell: bash
+        run: |
+          set -e
+          ver=$(find dl -name '*.zip' | head -1 | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)(-[a-z0-9-]+)?\.zip$/\1/')
+          for try in 1 2 3 4 5; do
+            rm -rf out && git init -q out && cd out
+            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+            if git fetch -q --depth 1 origin builds; then git checkout -q -b builds FETCH_HEAD; else git checkout -q --orphan builds; fi
+            mkdir -p "flexknob/$ver"
+            find ../dl -type f \( -name '*.zip' -o -name '*.sha256' \) -exec cp {} "flexknob/$ver"/ \;
+            rm -rf flexknob/latest && cp -r "flexknob/$ver" flexknob/latest
+            git add -A flexknob
+            git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "builds: flexknob $ver (${{ github.sha }})" || exit 0
+            if git push -q origin builds; then exit 0; fi
+            cd .. && sleep $((try * 5))
+          done
+          exit 1
