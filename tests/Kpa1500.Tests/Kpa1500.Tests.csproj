@@ -6,11 +6,16 @@
     <AssemblyName>Kpa1500.Tests</AssemblyName>
     <RootNamespace>Kpa1500.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
+  <!-- The feature's source is compiled straight into the test program (rather
+       than referencing the feature project, which is built for one specific
+       computer type) so the same tests run on Windows, Linux and macOS. -->
+  <ItemGroup>
+    <Compile Include="../../src/Kpa1500/*.cs" />
+  </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="../../src/Kpa1500/Zeus.Community.Kpa1500.csproj" />
     <ProjectReference Include="../../sdk/Zeussdr.Zeus.Plugins.Contracts/Zeus.Plugins.Contracts.csproj" />
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
   </ItemGroup>
 </Project>
