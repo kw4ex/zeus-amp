@@ -374,8 +374,15 @@ function makePanel(callBackend) {
       text: amp.swr == null ? "—" : num(amp.swr, 1) + ":1", level: swrLevel }));
     if (cfg.showReflected) meters.push(h(Meter, { key: "rf", label: "Refl", value: amp.reflectedW, max: Math.max(100, Math.round(cfg.meterMaxWatts / 10)),
       text: amp.reflectedW == null ? "—" : amp.reflectedW + " W" }));
-    if (cfg.showInput) meters.push(h(Meter, { key: "in", label: "Drive", value: amp.inputW, max: 100,
-      text: amp.inputW == null ? "—" : amp.inputW + " W", level: amp.inputW != null && amp.inputW > 90 ? "warn" : "" }));
+    if (cfg.showInput) {
+      // The amp reads 0 drive while bypassed (STANDBY / ATU tuning); then the
+      // radio's own transmit power from TCI is shown, marked "radio".
+      const dw = amp.driveW != null ? amp.driveW : amp.inputW;
+      const fromRadio = amp.driveSource === "radio";
+      meters.push(h(Meter, { key: "in", label: fromRadio ? "Drive·rad" : "Drive", value: dw, max: 100,
+        text: dw == null ? "—" : Math.round(dw) + " W" + (fromRadio ? " (radio)" : ""),
+        level: dw != null && dw > 90 ? "warn" : "" }));
+    }
     if (cfg.showDissipation) meters.push(h(Meter, { key: "pd", label: "Diss", value: amp.dissipationW, max: cfg.meterMaxWatts,
       text: amp.dissipationW == null ? "—" : amp.dissipationW + " W" }));
 

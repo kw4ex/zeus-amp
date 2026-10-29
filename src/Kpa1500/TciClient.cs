@@ -70,6 +70,24 @@ public sealed class TciClient : IAsyncDisposable
     private long _levelCount;
     private long _lastLevelBits = BitConverter.DoubleToInt64Bits(double.NaN);
 
+    private long _radioFwdBits = BitConverter.DoubleToInt64Bits(0);
+    private long _radioFwdTicks;
+
+    /// <summary>
+    /// The radio's own forward power (W) from TCI tx_sensors, or null when not
+    /// transmitting / no recent report. Used as the drive reading while the
+    /// amp is bypassed (STANDBY or ATU tuning), when the amp itself reports 0.
+    /// </summary>
+    public double? RadioFwdW
+    {
+        get
+        {
+            if (!_connected || !_trx) return null;
+            var age = Environment.TickCount64 - Interlocked.Read(ref _radioFwdTicks);
+            return age > 1500 ? null : BitConverter.Int64BitsToDouble(Interlocked.Read(ref _radioFwdBits));
+        }
+    }
+
     /// <summary>Receive-level reports accepted since connecting.</summary>
     public long LevelCount => Interlocked.Read(ref _levelCount);
     /// <summary>Last receive level reported by Zeus (dBm), or null.</summary>
@@ -122,8 +140,8 @@ public sealed class TciClient : IAsyncDisposable
                 Interlocked.Exchange(ref _levelCount, 0);
                 Interlocked.Exchange(ref _lastLevelBits, BitConverter.DoubleToInt64Bits(double.NaN));
                 _sensorsEx = false;
-                // Ask for receive-level reports every 250 ms (TCI spec §4.4).
-                var req = Encoding.ASCII.GetBytes("rx_sensors_enable:true,250;");
+                // Ask for receive-level and transmit-power reports every 250 ms (TCI spec §4.4).
+                var req = Encoding.ASCII.GetBytes("rx_sensors_enable:true,250;tx_sensors_enable:true,250;");
                 await ws.SendAsync(new ArraySegment<byte>(req), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
                 _note("ok", $"TCI connected ({Target}) — Standby-on-Tune follows radio TUNE.");
                 Changed?.Invoke();
@@ -179,6 +197,16 @@ public sealed class TciClient : IAsyncDisposable
             var args = tok[(colon + 1)..].Split(',');
             if (args.Length < 2) continue;
             if (!int.TryParse(args[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var rx) || rx != _rx) continue;
+            if (name is "tx_sensors" or "tx_sensor")
+            {
+                // tx_sensors:rx,mic_db,fwd_watts,rev_or_peak_watts,swr
+                if (args.Length >= 3 && double.TryParse(args[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var fwd))
+                {
+                    Interlocked.Exchange(ref _radioFwdBits, BitConverter.DoubleToInt64Bits(Math.Max(0, fwd)));
+                    Interlocked.Exchange(ref _radioFwdTicks, Environment.TickCount64);
+                }
+                continue;
+            }
             if (name is "rx_channel_sensors_ex" or "rx_channel_sensors" or "rx_smeter")
             {
                 // rx_channel_sensors:rx,channel,dBm   (Zeus, Thetis)

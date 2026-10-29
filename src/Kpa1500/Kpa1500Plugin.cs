@@ -27,7 +27,7 @@ public sealed record OnRequest(bool On);
 public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 {
     /// <summary>Keep identical to plugin.json "version".</summary>
-    public const string ManifestVersion = "1.1.2";
+    public const string ManifestVersion = "1.1.3";
     private const string SettingsKey = "config";
 
     private IPluginContext? _ctx;
@@ -156,6 +156,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
             var tune = amp.TuneGuardState;
             var tci = amp.Tci;
             var (hz, hzSource) = amp.TrackHz;
+            var (driveW, driveSource) = amp.Drive;
             if (hz <= 0) hz = amp.RadioHz;
             return Results.Ok(new
             {
@@ -195,6 +196,8 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                     mac = s.Mac,
                     powerOnInProgress = s.PowerOnInProgress,
                     freqKhz = s.AmpFreqKhz,
+                    driveW,
+                    driveSource,
                     firmware = s.Firmware,
                     serial = s.SerialNumber,
                 },

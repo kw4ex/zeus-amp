@@ -216,6 +216,8 @@ Console.WriteLine("TCI parsing");
     Check("TCI tune for RX0 seen, other RX ignored", changes == 1);
     tci.Ingest("vfo:0,0,14205000;vfo:0,1,14225000;vfo:1,0,7100000;");
     Check("TCI VFO A/B parsed, RX1 ignored", changes == 2);
+    tci.Ingest("tx_sensors:0,0,9.0,0.4,1.1;");
+    Check("TCI tx_sensors not reported while not connected/transmitting", tci.RadioFwdW is null);
     tci.Ingest("split_enable:0,true;");
     Check("TCI split flag parsed", changes == 3);
     var levels = new List<double>();

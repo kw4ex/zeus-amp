@@ -461,6 +461,11 @@ public sealed class AmpController : IAsyncDisposable
         var tp = await Q(link, "TP", ct).ConfigureAwait(false);
         var fr = await Q(link, "FR", ct).ConfigureAwait(false);
         var meter = ws is null ? null : KpaProtocol.ParseWs(ws);
+        // While transmitting, read drive and reflected power on every pass.
+        bool txNow;
+        lock (_gate) txNow = TxLocked() || (meter is { Watts: >= RfPresentWatts });
+        var pwiFast = txNow ? await Q(link, "PWI", ct).ConfigureAwait(false) : null;
+        var pwrFast = txNow ? await Q(link, "PWR", ct).ConfigureAwait(false) : null;
 
         var slow = new List<(string Cmd, string? Val)>();
         for (var i = 0; i < 2; i++)
@@ -490,6 +495,8 @@ public sealed class AmpController : IAsyncDisposable
             if (fl is not null) _state.FaultCode = KpaProtocol.ParseFault(fl);
             if (tp is not null) _state.Tuning = KpaProtocol.Bool01(tp);
             if (fr is not null) _state.AmpFreqKhz = KpaProtocol.Int(fr) is int k and > 0 ? k : null;
+            if (pwiFast is not null) _state.InputW = KpaProtocol.Int(pwiFast);
+            if (pwrFast is not null) _state.ReflectedW = KpaProtocol.Int(pwrFast);
             foreach (var (cmd, val) in slow)
             {
                 if (val is null) continue;
@@ -626,6 +633,23 @@ public sealed class AmpController : IAsyncDisposable
     public void SetRadioController(IRadioController? rc) => _radioController = rc;
 
     public NoAntSnapshot GetNoAnt() => _noAnt.Snapshot(DateTime.UtcNow);
+
+    /// <summary>
+    /// Drive power and where it came from. The KPA1500 reports input power as 0
+    /// whenever its PA is bypassed (STANDBY or ATU tuning), so the radio's own
+    /// measurement (TCI tx_sensors) is used then — as the Thetis bridge did.
+    /// </summary>
+    public (double? Watts, string Source) Drive
+    {
+        get
+        {
+            int? pin; bool? operate; bool tuning;
+            lock (_gate) { pin = _state.InputW; operate = _state.Operate; tuning = _state.Tuning == true; }
+            if (operate == true && !tuning && pin is > 0) return (pin, "amp");
+            if (_tci?.RadioFwdW is { } r && r > 0) return (Math.Round(r, 1), "radio");
+            return (pin, pin is null ? "" : "amp");
+        }
+    }
 
     private async Task StepNoAntennaAsync(KpaLink link, PluginConfig cfg, bool tx, bool? operate, string? fault, CancellationToken ct)
     {
