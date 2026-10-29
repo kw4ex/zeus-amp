@@ -162,3 +162,28 @@ jobs:
           Expand-Archive $zip.FullName $dir -Force
           Get-ChildItem $dir | Format-Table Name, Length
           dotnet run --project tools/LoadCheck -c Release -- $dir
+
+  # Keeps every passing main build on the "builds" branch, so the ZIPs can be
+  # fetched with plain git (and downloaded from a stable link).
+  publish-builds:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [package, package-unix, load-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dl
+      - name: Commit ZIPs to the builds branch
+        shell: bash
+        run: |
+          set -e
+          git init -q out && cd out
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git fetch -q --depth 1 origin builds; then git checkout -q -b builds FETCH_HEAD; else git checkout -q --orphan builds; fi
+          ver=$(find ../dl -name '*.zip' | head -1 | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)(-[a-z0-9-]+)?\.zip$/\1/')
+          mkdir -p "$ver"
+          find ../dl -type f \( -name '*.zip' -o -name '*.sha256' \) -exec cp {} "$ver"/ \;
+          rm -rf latest && cp -r "$ver" latest
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "builds: $ver (${{ github.sha }})" || exit 0
+          git push -q origin builds
