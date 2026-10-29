@@ -12,7 +12,14 @@ var passed = 0;
 void Check(string name, bool ok)
 {
     if (ok) { passed++; Console.WriteLine("  ok   " + name); }
-    else { failures++; Console.WriteLine("  FAIL " + name); }
+    else
+    {
+        failures++;
+        Console.WriteLine("  FAIL " + name);
+        // On GitHub, also raise an annotation so the failure shows on the run page.
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+            Console.WriteLine($"::error title=Test failed on {System.Runtime.InteropServices.RuntimeInformation.OSDescription}::{name}");
+    }
 }
 async Task<bool> WaitFor(Func<bool> cond, double seconds = 4)
 {
@@ -42,7 +49,7 @@ var magic = NetTools.BuildMagic("54:10:EC:14:75:22");
 Check("magic packet", magic.Length == 102 && magic[0] == 0xFF && magic[6] == 0x54 && magic[101] == 0x22);
 var badCfg = new PluginConfig { PollMs = 10, Transport = "tcp" }.Validate();
 Check("config validate", badCfg.Count == 2);
-if (badCfg.Count != 2) Console.WriteLine("       errors: " + string.Join(" | ", badCfg));
+if (badCfg.Count != 2) Console.WriteLine("::warning::config errors: " + string.Join(" | ", badCfg));
 Check("default config is valid", new PluginConfig().Validate().Count == 0);
 
 Console.WriteLine("TuneGuard");
@@ -91,7 +98,7 @@ using (var amp = new FakeAmp())
 
     Check("connects and sees OPERATE", await WaitFor(() => ctl.State.Power == "on" && ctl.State.Operate == true));
     Check("telemetry read", await WaitFor(() => ctl.State.Volts is > 51.2 and < 51.4 && ctl.State.AtuInline == true && ctl.State.FanMinimum == 1));
-{ var st = ctl.State; Console.WriteLine($"       volts={st.Volts} atu={st.AtuInline} fanMin={st.FanMinimum} temp={st.TempC} ant={st.Antenna}"); }
+{ var st = ctl.State; Console.WriteLine($"::notice::state power={st.Power} conn={st.Connection} err={st.ConnectionError} volts={st.Volts} atu={st.AtuInline} fanMin={st.FanMinimum} ant={st.Antenna}"); }
     Check("^FR sent for Zeus frequency", await WaitFor(() => amp.Freq == 14205));
     Check("no ^BN by default", !amp.Received.Any(c => c.StartsWith("^BN") && c.Length == 6));
 
