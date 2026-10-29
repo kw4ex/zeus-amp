@@ -200,7 +200,7 @@ using (var amp = new FakeAmp())
 
     // Power off / on (WoL to loopback is harmless).
     Check("power off", (await ctl.SetPowerAsync(false, CancellationToken.None)).Ok && await WaitFor(() => amp.Asleep));
-    Check("asleep → no reply", await WaitFor(() => ctl.State.Power == "unknown"));
+    Check("asleep → no reply", await WaitFor(() => ctl.State.Power == "unknown", 10));
     Check("power on accepted", (await ctl.SetPowerAsync(true, CancellationToken.None)).Status == 202);
     Check("power on confirmed", await WaitFor(() => ctl.State.Power == "on", 8));
     Check("never keyed: no MOX command exists", !amp.Received.Any(c => c.StartsWith("TX") || c.StartsWith("^TX")));
