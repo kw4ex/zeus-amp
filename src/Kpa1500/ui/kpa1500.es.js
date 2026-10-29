@@ -496,7 +496,7 @@ function Settings(p) {
     h("div", { className: c("glab") }, "Connection"),
     h("div", { className: c("row"), role: "radiogroup", "aria-label": "Connection type" },
       h("label", { className: c("chk") }, h("input", { type: "radio", name: id("tr"), checked: draft.transport !== "serial", onChange: () => set("transport", "udp") }), "Network (UDP)"),
-      h("label", { className: c("chk") }, h("input", { type: "radio", name: id("tr"), checked: draft.transport === "serial", onChange: () => set("transport", "serial") }), "Serial port (USB or virtual COM)")),
+      h("label", { className: c("chk") }, h("input", { type: "radio", name: id("tr"), checked: draft.transport === "serial", onChange: () => set("transport", "serial") }), "Serial port (USB or virtual)")),
     draft.transport !== "serial" ? [
       Field("Amp IP address", id("host"), h("div", { className: c("row") },
         h("input", { id: id("host"), className: c("in grow"), value: draft.host, placeholder: "192.168.0.175",
@@ -519,7 +519,7 @@ function Settings(p) {
         h("button", { type: "button", className: c("b"), onClick: p.onRefreshPorts }, "Refresh"))),
       Field("Baud", id("baud"), h("select", { id: id("baud"), className: c("in"), value: draft.baud, onChange: (e) => set("baud", Number(e.target.value)) },
         BAUDS.map((b) => h("option", { key: b, value: b }, String(b))))),
-      h("div", { key: "sernote", className: c("muted") }, "Any COM port works, including a virtual serial-port emulator. Only one program can open a COM port at a time; use a port splitter to share it."),
+      h("div", { key: "sernote", className: c("muted") }, "Any serial port works (COM3 on Windows, /dev/cu.usbserial-… on a Mac), including a virtual serial-port emulator. Only one program can open a serial port at a time; use a port splitter to share it."),
     ],
     Field("Poll interval (ms)", id("pollMs"), numIn("pollMs", 50, 2000, 10)),
     h("div", { className: c("checks") }, Check(draft, setDraft, "autoConnect", "Connect automatically")),

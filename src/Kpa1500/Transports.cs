@@ -7,7 +7,8 @@
 //     UDP keeps no session, so other programs on the LAN (the Elecraft
 //     utility, loggers, another bridge) can query the amp at the same time;
 //     this side uses its own ephemeral source port so replies never collide.
-//   • USB: the rear FTDI port, 8N1, no flow control, 4800–230400 bit/s.
+//   • Serial: the rear USB (FTDI) port or a virtual serial port, 8N1, no flow
+//     control, 4800–230400 bit/s. COM3 on Windows, /dev/cu.usbserial-… on macOS.
 // The serial code lives in its own type so System.IO.Ports is only touched
 // when the operator actually picks USB; UDP works on every platform.
 
@@ -76,7 +77,18 @@ public static class Transports
             }
         }
 
-        public static string[] Names() => SerialPort.GetPortNames().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
+        public static string[] Names()
+        {
+            var names = SerialPort.GetPortNames();
+            if (OperatingSystem.IsMacOS())
+            {
+                // macOS lists each port twice (/dev/tty.* and /dev/cu.*); the
+                // "cu" (call-out) device is the one a program should open.
+                var cu = names.Where(n => n.StartsWith("/dev/cu.", StringComparison.Ordinal)).ToArray();
+                if (cu.Length > 0) names = cu;
+            }
+            return names.Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
     }
 
     /// <summary>
