@@ -214,6 +214,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                 pendingBand = amp.PendingBand >= 0 ? KpaProtocol.BandName(amp.PendingBand) : null,
                 noAnt = NoAntJson(amp),
                 otherController = amp.OtherController,
+                standbyOnTune = amp.Config.StandbyOnTune,
                 tuneGuard = new
                 {
                     phase = tune.Phase.ToString().ToLowerInvariant(),

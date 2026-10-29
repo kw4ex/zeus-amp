@@ -326,7 +326,8 @@ function makePanel(callBackend) {
       "aria-pressed": !!lit, disabled: !!opts.disabled, title: opts.title, onClick: opts.onClick }, label);
 
     const operating = on && amp.operate === true;
-    const armed = guard.phase !== "idle";
+    // Live from the backend, so a change made elsewhere (FlexControl knob) shows at once.
+    const sotOn = status.standbyOnTune != null ? !!status.standbyOnTune : !!cfg.standbyOnTune;
     const inline = on && amp.atuInline === true;
     // Each control: [shown?, inline buttons | block element]
     const CONTROLS = {
@@ -346,14 +347,14 @@ function makePanel(callBackend) {
         onClick: () => act("/operate", { operate: !operating }) })],
       // On/off switch, like the Thetis bridge: lit = whenever TUNE is pressed in
       // Zeus the amp goes to STANDBY, and back to OPERATE when TUNE ends.
-      tunestby: () => cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", !!cfg.standbyOnTune, {
+      tunestby: () => cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", sotOn, {
         variant: "litamber", disabled: busy,
-        title: (cfg.standbyOnTune
+        title: (sotOn
           ? "Standby on Tune is ON: pressing TUNE in Zeus puts the amp in STANDBY, and OPERATE returns afterwards. Click to turn it off."
           : "Standby on Tune is OFF. Click to turn it on.") +
-          (cfg.standbyOnTune && !(tci.enabled && tci.connected) && !cfg.autoTuneDetect ? " (Needs Zeus TCI connected — see Settings.)" : ""),
+          (sotOn && !(tci.enabled && tci.connected) && !cfg.autoTuneDetect ? " (Needs Zeus TCI connected — see Settings.)" : ""),
         onClick: async () => {
-          await act("/tune-guard/enable", { on: !cfg.standbyOnTune });
+          await act("/tune-guard/enable", { on: !sotOn });
           try { const x = await call(callBackend, "GET", "/config"); if (x) setCfgSaved(x); } catch (e) { /* keep */ }
         } })],
       antenna: () => cfg.ctlAntenna && [1, 2].map((a) => {
