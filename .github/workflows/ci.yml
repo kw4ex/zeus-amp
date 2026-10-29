@@ -30,7 +30,15 @@ jobs:
         shell: bash
         run: git diff --exit-code -- src/Kpa1500/packages.lock.json
       - name: Tests (fake KPA1500 over loopback UDP, no hardware)
-        run: dotnet run --project tests/Kpa1500.Tests -c Release --no-build
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! dotnet run --project tests/Kpa1500.Tests -c Release --no-build 2>&1 | tee test-output.txt; then
+            # Surface the end of the output (e.g. a crash message) on the run page.
+            msg=$(tail -n 60 test-output.txt | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN{ORS="%0A"} {print}')
+            echo "::error title=Test output tail ($RUNNER_OS)::$msg"
+            exit 1
+          fi
 
   package:
     needs: test
