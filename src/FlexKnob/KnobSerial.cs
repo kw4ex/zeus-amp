@@ -31,6 +31,7 @@ public sealed class KnobSerial : IAsyncDisposable
     private volatile string _port;
     private volatile bool _reconnect;
     private volatile bool _connected;
+    private int _shown;   // first few messages are written to the event log (shows the knob is talking)
 
     public KnobSerial(string port, Action<string> onCode, Action<string, string> note,
         Func<string, IKnobPort>? open = null, Func<string?>? find = null)
@@ -96,6 +97,7 @@ public sealed class KnobSerial : IAsyncDisposable
                         buf.Clear();
                         Device = dev;
                         Error = "";
+                        _shown = 0;
                         _connected = true;
                         _note("ok", $"FlexControl knob connected on {dev}.");
                         _onCode("__connected__");
@@ -127,7 +129,11 @@ public sealed class KnobSerial : IAsyncDisposable
                         {
                             var code = buf.ToString().Trim();
                             buf.Clear();
-                            if (code.Length > 0) _onCode(code);
+                            if (code.Length > 0)
+                            {
+                                if (_shown < 5) { _shown++; _note("info", $"Knob sends: {code};"); }
+                                _onCode(code);
+                            }
                         }
                         else if (buf.Length < 64) buf.Append(ch);
                         else buf.Clear();               // junk without ";" — start over
@@ -175,6 +181,11 @@ public sealed class KnobSerial : IAsyncDisposable
         var p = new SerialPort(name, KnobCatalog.Baud, Parity.None, 8, StopBits.One)
         {
             Handshake = Handshake.None,
+            // The bridge's pyserial switches DTR and RTS on when it opens a
+            // port; the FlexControl only sends once they are on. .NET leaves
+            // them off unless asked.
+            DtrEnable = true,
+            RtsEnable = true,
             ReadTimeout = 200,
             WriteTimeout = 500,
         };

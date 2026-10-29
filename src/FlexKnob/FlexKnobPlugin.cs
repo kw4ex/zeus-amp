@@ -20,7 +20,7 @@ public sealed record HelloRequest(string Origin);
 public sealed class FlexKnobPlugin : IZeusPlugin, IBackendPlugin
 {
     /// <summary>Keep identical to plugin.json "version".</summary>
-    public const string ManifestVersion = "1.0.0";
+    public const string ManifestVersion = "1.0.1";
     private const string SettingsKey = "config";
 
     private IPluginContext? _ctx;

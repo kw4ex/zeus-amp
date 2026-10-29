@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Zeus.Community.FlexKnob</AssemblyName>
     <RootNamespace>Zeus.Community.FlexKnob</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <IsPackable>false</IsPackable>
     <!-- Bundle System.IO.Ports beside the plugin for the FlexControl USB connection
          (packaged with -ManagedDependency System.IO.Ports.dll). -->

@@ -106,6 +106,7 @@ await using (var zeus = new FakeZeus())
 
     port.Feed("U;");
     Check("one click up → VFO A +500 Hz (Zeus's step)", await WaitFor(() => radio.FrequencyHz == 14_200_500));
+    Check("first messages from the knob are shown in the event log", await WaitFor(() => log.Snapshot().Any(e => e.Message == "Knob sends: U;")));
     port.Feed("D03;");
     Check("fast spin down (D03 × speed 2 = 6 steps) → -3 kHz", await WaitFor(() => radio.FrequencyHz == 14_197_500));
     port.Feed("U;U;U;U;");
