@@ -276,9 +276,14 @@ public sealed class AmpController : IAsyncDisposable
     public bool RadioMox => _radioMox;
     public string RadioMode => _radioMode;
     public int PendingBand => _bandPending;
-    public (bool Enabled, bool Connected, bool Tune, string Target, string Error) Tci
+    public (bool Enabled, bool Connected, bool Tune, string Target, string Error, long Levels, double? LastLevel, int? LevelChannel) Tci
     {
-        get { var t = _tci; return t is null ? (false, false, false, "", "") : (true, t.Connected, t.Tune, t.Target, t.LastError); }
+        get
+        {
+            var t = _tci;
+            return t is null ? (false, false, false, "", "", 0, null, null)
+                : (true, t.Connected, t.Tune, t.Target, t.LastError, t.LevelCount, t.LastLevel, t.LevelChannel);
+        }
     }
 
     public (TunePhase Phase, string Trigger, bool Restore) TuneGuardState

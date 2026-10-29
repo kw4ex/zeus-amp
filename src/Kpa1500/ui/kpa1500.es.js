@@ -392,9 +392,10 @@ function makePanel(callBackend) {
     if (cfg.showRxLevel) {
       const na = status.noAnt || {};
       const bad = na.state === "low" || na.state === "tx";
+      const live = na.dbm != null ? na.dbm : tci.lastLevel;
       const text = !cfg.tciEnabled ? "TCI off"
         : !tci.connected ? "TCI wait"
-        : na.dbm == null ? "—" : Math.round(na.dbm) + " dBm";
+        : live == null ? "no data" : Math.round(live) + " dBm";
       tiles.push(Tile("RX level", text, bad));
     }
     if (cfg.showFan) tiles.push(Tile("Fan", amp.fan == null ? "—" : String(amp.fan) + " / 5"));
@@ -709,7 +710,10 @@ function Settings(p) {
       Field("TCI receiver", id("tciReceiver"), numIn("tciReceiver", 0, 7)),
       h("div", { key: "tcist", className: c(p.tciStatus && p.tciStatus.connected ? "muted" : "err"), role: "status" },
         !p.tciStatus || !p.tciStatus.enabled ? "TCI status: not started yet — click Save."
-          : p.tciStatus.connected ? "TCI status: connected to Zeus at " + p.tciStatus.target + "."
+          : p.tciStatus.connected ? "TCI status: connected to Zeus at " + p.tciStatus.target + ". " +
+            (p.tciStatus.levels > 0
+              ? "Receive level: " + Math.round(p.tciStatus.lastLevel) + " dBm (" + p.tciStatus.levels + " reports, channel " + p.tciStatus.levelChannel + ")."
+              : "Zeus has not sent any receive-level reports yet.")
           : "TCI status: not connected — " + (p.tciStatus.error || "trying " + p.tciStatus.target + "…") +
             ". In Zeus's settings turn TCI on and use the same port here (Zeus's default is 40001)."),
     ] : null,

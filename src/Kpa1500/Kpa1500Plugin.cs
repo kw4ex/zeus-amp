@@ -27,7 +27,7 @@ public sealed record OnRequest(bool On);
 public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 {
     /// <summary>Keep identical to plugin.json "version".</summary>
-    public const string ManifestVersion = "1.1.1";
+    public const string ManifestVersion = "1.1.2";
     private const string SettingsKey = "config";
 
     private IPluginContext? _ctx;
@@ -161,7 +161,11 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
             {
                 version = ManifestVersion,
                 connection = new { state = s.Connection, error = s.ConnectionError, target = s.Target, transport = cfg.Transport },
-                tci = new { enabled = tci.Enabled, connected = tci.Connected, tune = tci.Tune, target = tci.Target, error = tci.Error },
+                tci = new
+                {
+                    enabled = tci.Enabled, connected = tci.Connected, tune = tci.Tune, target = tci.Target, error = tci.Error,
+                    levels = tci.Levels, lastLevel = tci.LastLevel is { } ll ? Math.Round(ll, 1) : (double?)null, levelChannel = tci.LevelChannel,
+                },
                 amp = new
                 {
                     power = s.Power,

@@ -66,6 +66,16 @@ public sealed class TciClient : IAsyncDisposable
     public event Action<double>? RxLevel;
 
     private volatile bool _sensorsEx;   // Thetis-style rx_channel_sensors_ex seen: prefer its average
+    private int _levelChannel = int.MaxValue;   // receiver channel the level reports use (lowest seen)
+    private long _levelCount;
+    private long _lastLevelBits = BitConverter.DoubleToInt64Bits(double.NaN);
+
+    /// <summary>Receive-level reports accepted since connecting.</summary>
+    public long LevelCount => Interlocked.Read(ref _levelCount);
+    /// <summary>Last receive level reported by Zeus (dBm), or null.</summary>
+    public double? LastLevel { get { var v = BitConverter.Int64BitsToDouble(Interlocked.Read(ref _lastLevelBits)); return double.IsNaN(v) || !_connected ? null : v; } }
+    /// <summary>The channel number Zeus uses for the receive level (diagnostics).</summary>
+    public int? LevelChannel => _levelChannel == int.MaxValue ? null : _levelChannel;
 
     public string Target => $"{_host}:{_port}";
 
@@ -108,6 +118,9 @@ public sealed class TciClient : IAsyncDisposable
                 _connected = true;
                 warned = false;
                 LastError = "";
+                _levelChannel = int.MaxValue;
+                Interlocked.Exchange(ref _levelCount, 0);
+                Interlocked.Exchange(ref _lastLevelBits, BitConverter.DoubleToInt64Bits(double.NaN));
                 _sensorsEx = false;
                 // Ask for receive-level reports every 250 ms (TCI spec §4.4).
                 var req = Encoding.ASCII.GetBytes("rx_sensors_enable:true,250;");
@@ -171,14 +184,23 @@ public sealed class TciClient : IAsyncDisposable
                 // rx_channel_sensors:rx,channel,dBm   (Zeus, Thetis)
                 // rx_channel_sensors_ex:rx,channel,signal,average,peak_bin  (Thetis)
                 // rx_smeter:rx,channel,dBm   (Zeus broadcasts this to every client)
-                if (args.Length < 3 || !int.TryParse(args[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ch) || ch != 0)
+                if (args.Length < 3 || !int.TryParse(args[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ch) || ch < 0)
                     continue;
+                // Zeus tags the level with its internal DSP channel number, which is
+                // not always 0. Follow the lowest channel seen (the main receiver).
+                if (ch < _levelChannel) _levelChannel = ch;
+                if (ch != _levelChannel) continue;
                 string? level = null;
                 if (name == "rx_channel_sensors_ex" && args.Length >= 4) { _sensorsEx = true; level = args[3]; }
                 else if (name == "rx_channel_sensors" && !_sensorsEx) level = args[2];
                 else if (name == "rx_smeter" && !_sensorsEx) level = args[2];
                 if (level is not null && double.TryParse(level.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dbm))
+                {
+                    if (Interlocked.Increment(ref _levelCount) == 1)
+                        _note("ok", $"Zeus is sending the receive level ({name}, channel {ch}, {dbm:0} dBm).");
+                    Interlocked.Exchange(ref _lastLevelBits, BitConverter.DoubleToInt64Bits(dbm));
                     RxLevel?.Invoke(dbm);
+                }
                 continue;
             }
             if (name == "vfo")
