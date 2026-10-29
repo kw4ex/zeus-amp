@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Optional, read-only TCI listener. It learns when the radio's TUNE and TX are
-// active (the Zeus plugin SDK exposes MOX but no TUNE flag) and the transmit
-// frequency — VFO A, or VFO B when split is on — exactly as the earlier Thetis
-// bridge did from "tune:", "trx:", "vfo:" and "split_enable:" events.
-// It never sends commands that change the radio.
+// Optional TCI listener. It learns when the radio's TUNE and TX are active
+// (the Zeus plugin SDK exposes MOX but no TUNE flag), the transmit frequency —
+// VFO A, or VFO B when split is on — and the receive level in dBm for the
+// "No antenna?" check, as the earlier Thetis bridge did from "tune:", "trx:",
+// "vfo:", "split_enable:" and "rx_channel_sensors:" events.
+// The only thing it sends is "rx_sensors_enable:true,250;", which asks Zeus
+// for receive-level reports; it never sends commands that change the radio.
 //
 // Note for catalog submission: the Zeus community rules discourage plugins
 // from talking to Zeus's own interfaces. This listener is OFF by default; see
@@ -60,6 +62,11 @@ public sealed class TciClient : IAsyncDisposable
     /// <summary>Raised on the TCI thread whenever tune/trx/split/VFO/connection changes.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised on the TCI thread for each receive-level report (dBm, RX1 / channel 0).</summary>
+    public event Action<double>? RxLevel;
+
+    private volatile bool _sensorsEx;   // Thetis-style rx_channel_sensors_ex seen: prefer its average
+
     public string Target => $"{_host}:{_port}";
 
     private async Task RunAsync(CancellationToken ct)
@@ -77,6 +84,10 @@ public sealed class TciClient : IAsyncDisposable
                 }
                 _connected = true;
                 warned = false;
+                _sensorsEx = false;
+                // Ask for receive-level reports every 250 ms (TCI spec §4.4).
+                var req = Encoding.ASCII.GetBytes("rx_sensors_enable:true,250;");
+                await ws.SendAsync(new ArraySegment<byte>(req), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
                 _note("ok", $"TCI connected ({Target}) — Standby-on-Tune follows radio TUNE.");
                 Changed?.Invoke();
 
@@ -129,6 +140,21 @@ public sealed class TciClient : IAsyncDisposable
             var args = tok[(colon + 1)..].Split(',');
             if (args.Length < 2) continue;
             if (!int.TryParse(args[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var rx) || rx != _rx) continue;
+            if (name is "rx_channel_sensors_ex" or "rx_channel_sensors" or "rx_smeter")
+            {
+                // rx_channel_sensors:rx,channel,dBm   (Zeus, Thetis)
+                // rx_channel_sensors_ex:rx,channel,signal,average,peak_bin  (Thetis)
+                // rx_smeter:rx,channel,dBm   (Zeus broadcasts this to every client)
+                if (args.Length < 3 || !int.TryParse(args[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ch) || ch != 0)
+                    continue;
+                string? raw = null;
+                if (name == "rx_channel_sensors_ex" && args.Length >= 4) { _sensorsEx = true; raw = args[3]; }
+                else if (name == "rx_channel_sensors" && !_sensorsEx) raw = args[2];
+                else if (name == "rx_smeter" && !_sensorsEx) raw = args[2];
+                if (raw is not null && double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dbm))
+                    RxLevel?.Invoke(dbm);
+                continue;
+            }
             if (name == "vfo")
             {
                 // vfo:rx,channel,hz  (channel 0 = VFO A, 1 = VFO B)

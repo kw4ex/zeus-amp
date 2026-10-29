@@ -36,11 +36,18 @@ public sealed class PluginConfig
     public bool StandbyOnTune { get; set; } = true;       // master switch
     public bool TciEnabled { get; set; }                  // tune/TX events from Zeus's TCI server
     public string TciHost { get; set; } = "127.0.0.1";
-    public int TciPort { get; set; } = 6060;
+    public int TciPort { get; set; } = 40001;            // Zeus's default TCI port
     public int TciReceiver { get; set; }
     public bool AutoTuneDetect { get; set; } = true;      // also trigger when Zeus's mode reports TUNE
     public bool RestoreOperateAfterTune { get; set; } = true;
     public int TuneTimeoutS { get; set; } = 30;           // manual arm: wait this long for a carrier
+
+    // ── "No antenna?" check (receive level from Zeus over TCI) ──
+    public bool NoAntEnabled { get; set; } = true;
+    public string NoAntAction { get; set; } = "warn";     // "warn" | "standby"
+    public bool NoAntAutoLearn { get; set; } = true;      // learn each band's noise floor while listening
+    public int NoAntBelowFloorDb { get; set; } = 8;       // limit = band noise floor − this
+    public int NoAntAboveEquipDb { get; set; } = 8;       // limit = equipment noise (no antenna) + this
 
     // ── telemetry shown ──
     public bool ShowForward { get; set; } = true;
@@ -52,6 +59,8 @@ public sealed class PluginConfig
     public bool ShowVoltage { get; set; } = true;
     public bool ShowCurrent { get; set; } = true;
     public bool ShowFan { get; set; } = true;
+    public bool ShowAmpFreq { get; set; } = true;
+    public bool ShowRxLevel { get; set; } = true;
     public bool ShowAtuStatus { get; set; } = true;
     public bool ShowLog { get; set; }
 
@@ -107,6 +116,9 @@ public sealed class PluginConfig
         if (TciPort is < 1 or > 65535) e.Add("TCI port must be 1–65535.");
         if (TciReceiver is < 0 or > 7) e.Add("TCI receiver must be 0–7.");
         if (TuneTimeoutS is < 5 or > 120) e.Add("Tune timeout must be 5–120 s.");
+        if (NoAntAction is not ("warn" or "standby")) e.Add("No-antenna action must be warn or standby.");
+        if (NoAntBelowFloorDb is < 1 or > 30) e.Add("Margin below the noise floor must be 1–30 dB.");
+        if (NoAntAboveEquipDb is < 1 or > 30) e.Add("Margin above equipment noise must be 1–30 dB.");
         if (TempUnit is not ("C" or "F")) e.Add("Temperature unit must be C or F.");
         if (MeterMaxWatts is < 100 or > 3000) e.Add("Meter full scale must be 100–3000 W.");
         if (double.IsNaN(SwrWarn) || SwrWarn is < 1.1 or > 10) e.Add("SWR warning must be 1.1–10.");
@@ -134,6 +146,10 @@ public sealed class PluginConfig
         if (c.TciPort is < 1 or > 65535) c.TciPort = d.TciPort;
         c.TciReceiver = Math.Clamp(c.TciReceiver, 0, 7);
         c.TuneTimeoutS = Math.Clamp(c.TuneTimeoutS, 5, 120);
+        if (c.TciPort == 6060 && !c.TciEnabled) c.TciPort = d.TciPort;   // old wrong default
+        if (c.NoAntAction is not ("warn" or "standby")) c.NoAntAction = d.NoAntAction;
+        c.NoAntBelowFloorDb = Math.Clamp(c.NoAntBelowFloorDb, 1, 30);
+        c.NoAntAboveEquipDb = Math.Clamp(c.NoAntAboveEquipDb, 1, 30);
         if (c.TempUnit is not ("C" or "F")) c.TempUnit = d.TempUnit;
         c.MeterMaxWatts = Math.Clamp(c.MeterMaxWatts, 100, 3000);
         c.SwrWarn = double.IsNaN(c.SwrWarn) ? d.SwrWarn : Math.Clamp(c.SwrWarn, 1.1, 10);

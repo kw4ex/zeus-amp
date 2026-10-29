@@ -20,6 +20,9 @@ public sealed record AntennaRequest(int Antenna);
 public sealed record AtuRequest(bool Inline);
 public sealed record TuneGuardRequest(bool Arm);
 public sealed record FanRequest(int Speed);
+public sealed record NoAntBandRequest(string Band, int? Limit, bool Reset);
+public sealed record NoAntLearnRequest(bool AntennaConnected);
+public sealed record OnRequest(bool On);
 
 public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 {
@@ -31,6 +34,8 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
     private AmpController? _amp;
     private readonly EventLog _events = new(250);
     private Timer? _radioProbe;
+    private Timer? _noAntSave;
+    private const string NoAntKey = "noant";
 
     public async Task InitializeAsync(IPluginContext context, CancellationToken ct)
     {
@@ -42,6 +47,18 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 
         _amp = new AmpController(context.Logger, _events);
         _amp.MacLearned += mac => _ = SaveLearnedMacAsync(mac);
+        _amp.SetRadioController(context.RadioController);
+
+        // Per-band "No antenna?" limits live under their own key so a panel
+        // settings save can never overwrite freshly learned values.
+        try
+        {
+            var stored = await context.Settings.GetAsync<Dictionary<string, BandNoise>>(NoAntKey, ct).ConfigureAwait(false);
+            _amp.NoAntenna.Load(stored);
+        }
+        catch (Exception ex) { context.Logger.LogWarning(ex, "KPA1500 no-antenna limits unreadable; using defaults"); }
+        _noAntSave = new Timer(_ => _ = SaveNoAntAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _amp.NoAntenna.LimitsChanged += () => _noAntSave?.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
         if (context.Radio is { } radio) _amp.AttachRadio(radio);
         else
         {
@@ -63,6 +80,11 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
     public async Task ShutdownAsync(CancellationToken ct)
     {
         if (_radioProbe is not null) await _radioProbe.DisposeAsync().ConfigureAwait(false);
+        if (_noAntSave is not null)
+        {
+            await _noAntSave.DisposeAsync().ConfigureAwait(false);
+            await SaveNoAntAsync().ConfigureAwait(false);
+        }
         if (_amp is not null)
         {
             _amp.DetachRadio();
@@ -86,6 +108,36 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
             amp.ApplyConfig(cfg);
         }
         catch (Exception ex) { ctx.Logger.LogWarning(ex, "Could not save the learned KPA1500 MAC"); }
+    }
+
+    private async Task SaveNoAntAsync()
+    {
+        if (_amp is not { } amp || _ctx is not { } ctx) return;
+        try
+        {
+            var bands = amp.NoAntenna.Bands.ToDictionary(kv => kv.Key, kv => kv.Value);
+            await ctx.Settings.SetAsync(NoAntKey, bands).ConfigureAwait(false);
+        }
+        catch (Exception ex) { ctx.Logger.LogWarning(ex, "Could not save KPA1500 no-antenna limits"); }
+    }
+
+    private static object NoAntJson(AmpController amp)
+    {
+        var n = amp.GetNoAnt();
+        return new
+        {
+            state = n.State.ToString().ToLowerInvariant(),
+            band = n.Band,
+            dbm = n.Dbm is { } d ? Math.Round(d, 1) : (double?)null,
+            limit = n.Limit,
+            source = n.Source,
+            floor = n.Floor,
+            levelSeen = n.LevelSeen,
+            hold = amp.NoAntHold,
+            scanning = amp.Scanning,
+            scanStatus = amp.ScanStatus,
+            canScan = amp.CanScan,
+        };
     }
 
     private static IResult ToResult(CommandResult r) =>
@@ -138,6 +190,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                     wakeOnLan = s.WakeOnLan,
                     mac = s.Mac,
                     powerOnInProgress = s.PowerOnInProgress,
+                    freqKhz = s.AmpFreqKhz,
                     firmware = s.Firmware,
                     serial = s.SerialNumber,
                 },
@@ -152,6 +205,7 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                 },
                 tx = amp.Transmitting,
                 pendingBand = amp.PendingBand >= 0 ? KpaProtocol.BandName(amp.PendingBand) : null,
+                noAnt = NoAntJson(amp),
                 tuneGuard = new
                 {
                     phase = tune.Phase.ToString().ToLowerInvariant(),
@@ -221,6 +275,57 @@ public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
                 return Results.Ok(new { ok = true, searched, found });
             }
             finally { Interlocked.Exchange(ref _discovering, 0); }
+        });
+
+        // ── "No antenna?" check ──
+        endpoints.MapGet("noant", () =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            var bands = amp.NoAntenna.Bands;
+            return Results.Ok(new
+            {
+                current = NoAntJson(amp),
+                bands = KpaProtocol.BandNames.Select(b => new
+                {
+                    band = b,
+                    limit = bands[b].Limit,
+                    source = bands[b].Source,
+                    floor = bands[b].Floor,
+                    defaultLimit = NoAntennaMonitor.Defaults[b],
+                }),
+            });
+        });
+        endpoints.MapPost("noant/band", (NoAntBandRequest body) =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            if (KpaProtocol.BandCode(body.Band) < 0) return ToResult(CommandResult.Bad("Unknown band."));
+            if (body.Reset) { amp.NoAntenna.ResetBand(body.Band); return ToResult(CommandResult.Done($"{body.Band}: default limit restored.")); }
+            return amp.NoAntenna.SetManual(body.Band, body.Limit)
+                ? ToResult(CommandResult.Done(body.Limit is null ? $"{body.Band}: check off." : $"{body.Band}: limit {body.Limit} dBm."))
+                : ToResult(CommandResult.Bad($"The limit must be between {NoAntennaMonitor.MinLimit} and {NoAntennaMonitor.MaxLimit} dBm, or empty for no check."));
+        });
+        endpoints.MapPost("noant/learn", (NoAntLearnRequest body) =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            var (ok, msg) = amp.NoAntLearn(body.AntennaConnected);
+            return ToResult(ok ? CommandResult.Done(msg) : CommandResult.Conflict(msg));
+        });
+        endpoints.MapPost("noant/defaults", () =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            amp.NoAntenna.RestoreDefaults();
+            return ToResult(CommandResult.Done("All bands back to the default limits."));
+        });
+        endpoints.MapPost("noant/dummy", (OnRequest body) =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            var (ok, msg) = amp.NoAntDummy(body.On);
+            return ToResult(ok ? CommandResult.Done(msg) : CommandResult.Conflict(msg));
+        });
+        endpoints.MapPost("noant/scan", (OnRequest body) =>
+        {
+            if (_amp is not { } amp) return NotReady();
+            return ToResult(body.On ? amp.StartScan() : amp.StopScan());
         });
 
         endpoints.MapPost("tune-guard", async (TuneGuardRequest body, CancellationToken ct) =>

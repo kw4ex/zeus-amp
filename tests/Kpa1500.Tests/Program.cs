@@ -82,6 +82,57 @@ Console.WriteLine("TuneGuard");
     Check("fault blocks restore", g5.Step(false, false, false, true, true, TimeSpan.FromSeconds(30), t0) == TuneAction.None);
 }
 
+Console.WriteLine("No antenna? check");
+{
+    var t0 = new DateTime(2026, 10, 29, 4, 0, 0, DateTimeKind.Utc);
+    var m = new NoAntennaMonitor { AutoLearn = false };
+    DateTime Feed(NoAntennaMonitor mon, DateTime from, double dbm, double seconds)
+    {
+        var t = from;
+        for (var i = 0; i < seconds * 4; i++) { t = t.AddMilliseconds(250); mon.AddLevel(dbm, t); }
+        return t;
+    }
+    m.SetBand("40m", t0);
+    Check("no level yet → no data", m.Snapshot(t0.AddSeconds(5)).State == NoAntState.NoData);
+    var t = Feed(m, t0, -78, 5);
+    Check("normal level on 40m → ok", m.Snapshot(t).State == NoAntState.Ok);
+    t = Feed(m, t, -119, 4);
+    Check("-119 dBm on 40m (limit -105) → NO ANTENNA?", m.Snapshot(t).State == NoAntState.Low && m.Snapshot(t).Limit == -105);
+    m.SetTx(true, t);
+    Feed(m, t, -20, 1);
+    Check("key up while warned → TX warning, TX readings ignored", m.Snapshot(t).State == NoAntState.Tx && m.Snapshot(t).Dbm == -119);
+    m.SetTx(false, t);
+    Check("DUMMY OK silences", m.SetDummy(true).Ok);
+    t = Feed(m, t, -119, 3);
+    Check("dummy state shown", m.Snapshot(t).State == NoAntState.Dummy);
+    t = Feed(m, t, -103, 4);
+    Check("hysteresis: -103 (limit -105) still low", m.Snapshot(t).State == NoAntState.Dummy);
+    t = Feed(m, t, -80, 4);
+    Check("normal level → ok and DUMMY OK forgotten", m.Snapshot(t).State == NoAntState.Ok && !m.SetDummy(true).Ok);
+    m.SetBand("6m", t);
+    Check("6m has no check by default", m.Snapshot(t).State == NoAntState.NoCheck);
+
+    m.SetBand("80m", t);
+    t = Feed(m, t, -78, 4);
+    Check("learn with antenna: limit = level − 8", m.LearnCurrent(true, t).Ok && m.Bands["80m"].Limit == -86 && m.Bands["80m"].Source == "learned-floor");
+    t = Feed(m, t, -119, 4);
+    Check("learn without antenna: limit = level + 8", m.LearnCurrent(false, t).Ok && m.Bands["80m"].Limit == -111 && m.Bands["80m"].Source == "learned-equipment");
+    Check("typed limit kept", m.SetManual("20m", -100) && m.Bands["20m"].Source == "manual" && !m.SetManual("20m", -10));
+
+    // Auto-learn: moves at most 1 dB a minute, never learns a lost antenna.
+    var a = new NoAntennaMonitor { AutoLearn = true };
+    var ta = t0;
+    a.SetBand("40m", ta);
+    ta = Feed(a, ta, -80, 60);                                   // 1 minute of normal noise
+    Check("auto-learn starts slowly (≤ 1 dB/min from -105)", a.Bands["40m"].Source == "auto" && a.Bands["40m"].Limit >= -105 && a.Bands["40m"].Limit <= -103);
+    ta = Feed(a, ta, -80, 30 * 60);                              // 30 more minutes
+    Check("auto-learn reaches floor − 8 (-88)", a.Bands["40m"].Limit == -88);
+    ta = Feed(a, ta, -119, 5);
+    Check("antenna lost after learning → warning (not learned)", a.Snapshot(ta).State == NoAntState.Low);
+    ta = Feed(a, ta, -119, 10 * 60);
+    Check("10 min with no antenna: limit unchanged, still warning", a.Bands["40m"].Limit == -88 && a.Snapshot(ta).State == NoAntState.Low);
+}
+
 Console.WriteLine("Controller against a fake KPA1500 over UDP");
 using (var amp = new FakeAmp())
 {
@@ -100,6 +151,7 @@ using (var amp = new FakeAmp())
     Check("telemetry read", await WaitFor(() => ctl.State.Volts is > 51.2 and < 51.4 && ctl.State.AtuInline == true && ctl.State.FanMinimum == 1));
 { var st = ctl.State; Console.WriteLine($"::notice::state power={st.Power} conn={st.Connection} err={st.ConnectionError} volts={st.Volts} atu={st.AtuInline} fanMin={st.FanMinimum} ant={st.Antenna}"); }
     Check("^FR sent for Zeus frequency", await WaitFor(() => amp.Freq == 14205));
+    Check("amp frequency read back while receiving (^FR)", await WaitFor(() => ctl.State.AmpFreqKhz == 14205));
     Check("no ^BN by default", !amp.Received.Any(c => c.StartsWith("^BN") && c.Length == 6));
 
     radio.SetFrequency(14_210_000);
@@ -166,6 +218,13 @@ Console.WriteLine("TCI parsing");
     Check("TCI VFO A/B parsed, RX1 ignored", changes == 2);
     tci.Ingest("split_enable:0,true;");
     Check("TCI split flag parsed", changes == 3);
+    var levels = new List<double>();
+    tci.RxLevel += levels.Add;
+    tci.Ingest("rx_channel_sensors:0,0,-119;rx_smeter:0,0,-118;rx_channel_sensors:0,1,-50;rx_channel_sensors:1,0,-40;");
+    Check("TCI receive level (Zeus rx_channel_sensors / rx_smeter, RX1 ch 0 only)", levels.SequenceEqual(new[] { -119.0, -118.0 }));
+    levels.Clear();
+    tci.Ingest("rx_channel_sensors_ex:0,0,-100.0,-110.5,-60.0;rx_channel_sensors:0,0,-90;");
+    Check("Thetis rx_channel_sensors_ex average preferred", levels.SequenceEqual(new[] { -110.5 }));
 }
 
 Console.WriteLine($"\n{passed} passed, {failures} failed");

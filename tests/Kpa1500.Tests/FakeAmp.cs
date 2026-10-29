@@ -73,6 +73,7 @@ public sealed class FakeAmp : IDisposable
                 "^FS;" => $"^FS{Math.Max(FanMin, 1)};",
                 "^FC;" => $"^FC{FanMin};",
                 "^SB;" => "^SB016;",
+                "^FR;" => $"^FR{Freq:00000};",
                 _ => null,
             };
             if (o is null) Apply(c);

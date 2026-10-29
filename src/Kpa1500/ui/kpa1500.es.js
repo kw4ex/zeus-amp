@@ -93,6 +93,11 @@ const CSS = `
 .${ROOT} .${ROOT}__card{background:var(--bg-1);border:1px solid var(--line-strong);border-radius:var(--r-md);
   padding:12px;display:flex;flex-direction:column;gap:8px;max-width:320px}
 .${ROOT} .${ROOT}__card h3{margin:0;font-size:13px;color:var(--fg-0)}
+.${ROOT} .${ROOT}__ntab{width:100%;border-collapse:collapse;font-size:12px}
+.${ROOT} .${ROOT}__ntab th{text-align:left;color:var(--fg-1);font-weight:600;padding:3px 4px;border-bottom:1px solid var(--line-strong)}
+.${ROOT} .${ROOT}__ntab td{padding:2px 4px;border-bottom:1px solid var(--line);color:var(--fg-0)}
+.${ROOT} .${ROOT}__ntab tr.${ROOT}__cur td{background:var(--bg-2)}
+.${ROOT} .${ROOT}__ntab input{width:72px}
 .${ROOT} .${ROOT}__compact .${ROOT}__glab{display:none}
 .${ROOT}.${ROOT}__compact{gap:5px;padding:6px}
 .${ROOT}.${ROOT}__compact .${ROOT}__meter{grid-template-columns:44px 1fr 52px}
@@ -120,6 +125,9 @@ async function call(callBackend, method, path, body) {
   return data;
 }
 
+const mhz = (khz) => khz == null ? "—" : (khz / 1000).toFixed(3) + " MHz";
+const SOURCE_TEXT = { "default": "default", "manual": "typed", "learned-floor": "learned (antenna)",
+  "learned-equipment": "learned (no antenna)", "auto": "auto-learning" };
 const num = (v, d) => (v === null || v === undefined) ? "—" : (d === undefined ? String(v) : Number(v).toFixed(d));
 const tempText = (cdeg, unit) => cdeg == null ? "—"
   : unit === "F" ? Math.round(cdeg * 9 / 5 + 32) + " °F" : cdeg + " °C";
@@ -327,6 +335,27 @@ function makePanel(callBackend) {
         h("span", { className: c("grow") }, msg, guard.restore ? " OPERATE returns afterwards." : ""),
         h("button", { className: c("b"), type: "button", onClick: () => act("/tune-guard", { arm: false }) }, "Cancel")));
     }
+    const na = status.noAnt || { state: "off" };
+    if (cfg.noAntEnabled && (na.state === "low" || na.state === "tx")) {
+      const txNow = na.state === "tx";
+      banners.push(h("div", { key: "na", className: c("banner " + (txNow ? "tx" : "warn")), role: "alert" },
+        h("span", { className: c("grow") },
+          h("strong", null, txNow ? "TRANSMITTING — NO ANTENNA? " : "NO ANTENNA? "),
+          "RX " + Math.round(na.dbm) + " dBm on " + na.band + " (limit " + na.limit + " dBm). " +
+          (txNow ? "Check the antenna / dummy load!" : "Check the antenna.") +
+          (na.hold ? " Amp held in STANDBY." : "")),
+        h("button", { className: c("b"), type: "button", disabled: busy, title: "A dummy load is connected on purpose: silence the warning on this band",
+          onClick: () => act("/noant/dummy", { on: true }) }, "DUMMY OK")));
+    } else if (cfg.noAntEnabled && na.state === "dummy") {
+      banners.push(h("div", { key: "nd", className: c("banner acc"), role: "status" },
+        h("span", { className: c("grow") }, "DUMMY OK on " + na.band + " — no-antenna warning silenced until a normal level returns."),
+        h("button", { className: c("b"), type: "button", onClick: () => act("/noant/dummy", { on: false }) }, "Undo")));
+    }
+    if (na.scanning) {
+      banners.push(h("div", { key: "sc", className: c("banner acc"), role: "status" },
+        h("span", { className: c("grow") }, h("strong", null, "Band scan: "), na.scanStatus || "…"),
+        h("button", { className: c("b"), type: "button", onClick: () => act("/noant/scan", { on: false }) }, "Stop")));
+    }
     if (actErr) banners.push(h("div", { key: "e", className: c("banner warn"), role: "alert" }, actErr));
 
     // ── telemetry ──
@@ -349,6 +378,16 @@ function makePanel(callBackend) {
     if (cfg.showTemperature) tiles.push(Tile("Temp", tempText(amp.tempC, cfg.tempUnit), hot));
     if (cfg.showVoltage) tiles.push(Tile("PA volts", amp.volts == null ? "—" : num(amp.volts, 1) + " V"));
     if (cfg.showCurrent) tiles.push(Tile("PA amps", amp.amps == null ? "—" : num(amp.amps, 0) + " A"));
+    if (cfg.showAmpFreq) {
+      const vfoKhz = status.radio && status.radio.frequencyHz ? Math.round(status.radio.frequencyHz / 1000) : null;
+      const off = amp.freqKhz != null && vfoKhz != null && Math.abs(amp.freqKhz - vfoKhz) > 10 && cfg.sendFrequency;
+      tiles.push(Tile(off ? "Amp freq ≠ VFO" : "Amp freq", mhz(amp.freqKhz), off));
+    }
+    if (cfg.showRxLevel && cfg.noAntEnabled) {
+      const na = status.noAnt || {};
+      const bad = na.state === "low" || na.state === "tx";
+      tiles.push(Tile("RX level", na.dbm == null ? "—" : Math.round(na.dbm) + " dBm", bad));
+    }
     if (cfg.showFan) tiles.push(Tile("Fan", amp.fan == null ? "—" : String(amp.fan) + " / 5"));
     if (cfg.showAtuStatus) {
       tiles.push(Tile("ATU", amp.atuInline == null ? "—" : tuning ? "TUNING" : amp.atuInline ? "IN-LINE" : "BYPASS"));
@@ -465,7 +504,7 @@ function makePanel(callBackend) {
             h("button", { type: "button", className: c("b"), onClick: () => setConfirm(null) }, "Cancel"))));
     } else if (showSettings && draft) {
       overlay = h("div", { className: c("overlay"), style: { alignItems: "flex-start", overflow: "auto" } },
-        Settings({ draft, setDraft, ports, saveErr, connected, busy, found, mac: amp.mac,
+        Settings({ draft, setDraft, ports, saveErr, connected, busy, found, mac: amp.mac, callBackend,
           onFind: async () => {
             setFound({ searching: true });
             try { setFound(await call(callBackend, "POST", "/discover")); }
@@ -479,6 +518,88 @@ function makePanel(callBackend) {
     return h("div", { className: ROOT + (cfg.compact ? " " + c("compact") : ""), role: "region", "aria-label": "Elecraft KPA1500" },
       header, banners, telemetry, groups, logView, overlay);
   };
+}
+
+// Live per-band limits for the "No antenna?" check, inside Settings.
+function NoAntBands(props) {
+  const { callBackend, below, above } = props;
+  const [data, setData] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [edits, setEdits] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    let timer = null;
+    const tick = async () => {
+      try { const d = await call(callBackend, "GET", "/noant"); if (live) setData(d); } catch (e) { /* keep last */ }
+      if (live) timer = setTimeout(tick, 1000);
+    };
+    tick();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, []);
+
+  const post = async (path, body) => {
+    setBusy(true);
+    try { const r = await call(callBackend, "POST", path, body); setMsg(r && r.message ? r.message : "Done."); }
+    catch (e) { setMsg(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!data) return h("div", { className: c("muted") }, "Loading band limits…");
+  const cur = data.current || {};
+  const levelText = cur.dbm == null ? "no reading yet" : Math.round(cur.dbm) + " dBm";
+
+  const commit = (band, text) => {
+    const t = String(text).trim();
+    setEdits((e) => { const n = { ...e }; delete n[band]; return n; });
+    if (t === "") return post("/noant/band", { band, limit: null, reset: false });
+    const v = Number(t);
+    if (!Number.isFinite(v)) { setMsg("Type a number such as -105, or leave it empty for no check."); return null; }
+    return post("/noant/band", { band, limit: Math.round(v), reset: false });
+  };
+
+  return h("div", { className: c("group"), style: { borderTop: "none", paddingTop: 0 } },
+    h("div", { className: c("muted") },
+      cur.band ? ("Now on " + cur.band + ": receive level " + levelText + (cur.limit != null ? ", limit " + cur.limit + " dBm" : ", no check on this band")) + "."
+        : "The radio is not on a ham band."),
+    h("div", { className: c("btns") },
+      h("button", { type: "button", className: c("b"), disabled: busy || !cur.band,
+        title: "Antenna connected: limit = this band's noise floor − " + below + " dB",
+        onClick: () => post("/noant/learn", { antennaConnected: true }) }, "Learn this band (antenna connected)"),
+      h("button", { type: "button", className: c("b"), disabled: busy || !cur.band,
+        title: "Antenna disconnected: limit = equipment noise + " + above + " dB",
+        onClick: () => post("/noant/learn", { antennaConnected: false }) }, "Learn this band (antenna disconnected)")),
+    h("div", { className: c("btns") },
+      cur.scanning
+        ? h("button", { type: "button", className: c("b danger"), onClick: () => post("/noant/scan", { on: false }) }, "Stop band scan")
+        : h("button", { type: "button", className: c("b"), disabled: busy || !cur.canScan,
+            title: cur.canScan ? "Tunes the radio to the middle of each band's phone segment, measures the noise, sets the limit, then restores your frequency"
+              : "Zeus has not given this feature permission to tune the radio",
+            onClick: () => post("/noant/scan", { on: true }) }, "Scan all bands now (antenna connected)"),
+      h("button", { type: "button", className: c("b"), disabled: busy, onClick: () => post("/noant/defaults") }, "Default limits")),
+    cur.scanStatus ? h("div", { className: c("muted"), role: "status" }, "Scan: " + cur.scanStatus) : null,
+    msg ? h("div", { className: c("muted"), role: "status" }, msg) : null,
+    h("table", { className: c("ntab") },
+      h("thead", null, h("tr", null,
+        h("th", null, "Band"), h("th", null, "Limit (dBm)"), h("th", null, "How it was set"), h("th", null, "Noise floor"), h("th", null, ""))),
+      h("tbody", null, (data.bands || []).map((b) => {
+        const editing = Object.prototype.hasOwnProperty.call(edits, b.band);
+        return h("tr", { key: b.band, className: b.band === cur.band ? c("cur") : undefined },
+          h("td", null, b.band),
+          h("td", null, h("input", { className: c("in"), type: "text", inputMode: "numeric", "aria-label": b.band + " limit in dBm, empty for no check",
+            value: editing ? edits[b.band] : (b.limit == null ? "" : String(b.limit)), placeholder: "off",
+            onChange: (e) => { const v = e.target.value; setEdits((x) => ({ ...x, [b.band]: v })); },
+            onBlur: (e) => { if (editing) commit(b.band, e.target.value); },
+            onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); } })),
+          h("td", null, SOURCE_TEXT[b.source] || b.source),
+          h("td", null, b.floor == null ? "—" : Math.round(b.floor) + " dBm"),
+          h("td", null, h("button", { type: "button", className: c("b"), disabled: busy || b.source === "default",
+            "aria-label": "Reset " + b.band + " to the default limit", onClick: () => post("/noant/band", { band: b.band, limit: null, reset: true }) }, "Reset")));
+      }))),
+    h("div", { className: c("muted") },
+      "Empty = no check on that band. A limit you type is never changed automatically. " +
+      "Things that lower the receive level and can cause a false warning: the attenuator, preamp off, a very narrow filter, or a dead band at night."));
 }
 
 function Settings(p) {
@@ -546,7 +667,7 @@ function Settings(p) {
     h("div", { className: c("checks") },
       Check(draft, setDraft, "standbyOnTune", "Enable Standby-on-Tune"),
       Check(draft, setDraft, "restoreOperateAfterTune", "Return to OPERATE afterwards"),
-      Check(draft, setDraft, "tciEnabled", "Use Zeus TCI for TUNE and split VFO (like the Thetis bridge)"),
+      Check(draft, setDraft, "tciEnabled", "Use Zeus TCI for TUNE, split VFO and receive level (like the Thetis bridge)"),
       Check(draft, setDraft, "autoTuneDetect", "Also trigger when Zeus mode reports TUNE")),
     draft.tciEnabled ? [
       Field("TCI host", id("tciHost"), h("input", { id: id("tciHost"), className: c("in"), value: draft.tciHost, onChange: (e) => set("tciHost", e.target.value) })),
@@ -554,6 +675,20 @@ function Settings(p) {
       Field("TCI receiver", id("tciReceiver"), numIn("tciReceiver", 0, 7)),
     ] : null,
     Field("Tune button waits (s)", id("tuneTimeoutS"), numIn("tuneTimeoutS", 5, 120)),
+
+    h("div", { className: c("glab") }, "No antenna? check"),
+    h("div", { className: c("checks") },
+      Check(draft, setDraft, "noAntEnabled", "Warn when the receive level says no antenna"),
+      Check(draft, setDraft, "noAntAutoLearn", "Auto-learn each band's noise floor while listening")),
+    Field("When it warns", id("noAntAction"), h("select", { id: id("noAntAction"), className: c("in"), value: draft.noAntAction,
+      onChange: (e) => set("noAntAction", e.target.value) },
+      h("option", { value: "warn" }, "Warn only"),
+      h("option", { value: "standby" }, "Warn and keep the amp in STANDBY"))),
+    Field("Limit below noise floor (dB)", id("noAntBelowFloorDb"), numIn("noAntBelowFloorDb", 1, 30)),
+    Field("Limit above no-antenna noise (dB)", id("noAntAboveEquipDb"), numIn("noAntAboveEquipDb", 1, 30)),
+    draft.tciEnabled ? null : h("div", { key: "natci", className: c("muted") },
+      "This check needs the receive level from Zeus: tick \"Use Zeus TCI\" above and set Zeus's TCI port (Zeus's default is 40001)."),
+    h(NoAntBands, { key: "nab", callBackend: p.callBackend, below: draft.noAntBelowFloorDb, above: draft.noAntAboveEquipDb }),
 
     h("div", { className: c("glab") }, "Telemetry shown"),
     h("div", { className: c("checks") },
@@ -567,6 +702,8 @@ function Settings(p) {
       Check(draft, setDraft, "showCurrent", "PA current"),
       Check(draft, setDraft, "showFan", "Fan speed"),
       Check(draft, setDraft, "showAtuStatus", "ATU status"),
+      Check(draft, setDraft, "showAmpFreq", "Amp frequency"),
+      Check(draft, setDraft, "showRxLevel", "Receive level (no-antenna check)"),
       Check(draft, setDraft, "showLog", "Event log")),
 
     h("div", { className: c("glab") }, "Controls shown"),

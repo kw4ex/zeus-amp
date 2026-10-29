@@ -4,22 +4,32 @@
   "name": "Elecraft KPA1500",
   "version": "1.0.0",
   "author": "KW4EX",
-  "description": "Control and telemetry for the Elecraft KPA1500 amplifier and its built-in ATU over Ethernet or USB: power, operate/standby, band and antenna, ATU in-line/bypass and tune, Standby-on-Tune, and Zeus band/frequency tracking.",
+  "description": "Control and telemetry for the Elecraft KPA1500 amplifier and its built-in ATU over UDP or serial: power, operate/standby, band, antenna, ATU, Standby-on-Tune, VFO tracking, Wake-on-LAN, discovery and a no-antenna warning.",
   "homepage": "https://github.com/kw4ex/zeus-amp",
   "license": "GPL-2.0-or-later",
-  "sdk": { "abi": 1, "minVersion": "1.5.0" },
+  "sdk": {
+    "abi": 1,
+    "minVersion": "1.5.0"
+  },
   "entrypoint": {
     "assembly": "Zeus.Community.Kpa1500.dll",
     "type": "Zeus.Community.Kpa1500.Kpa1500Plugin"
   },
-  "capabilities": ["ReadRadioState", "NetworkAccess", "PersistSettings"],
+  "capabilities": [
+    "ReadRadioState",
+    "ControlRadio",
+    "NetworkAccess",
+    "PersistSettings"
+  ],
   "permissions": {
     "network": true,
     "fileSystemRead": false,
     "fileSystemWrite": false
   },
   "ui": {
-    "modules": ["ui/kpa1500.es.js"],
+    "modules": [
+      "ui/kpa1500.es.js"
+    ],
     "panels": [
       {
         "id": "kpa1500.main",

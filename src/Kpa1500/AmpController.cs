@@ -58,6 +58,7 @@ public sealed class AmpState
     public double? Amps { get; set; }
     public int? Fan { get; set; }
     public int? FanMinimum { get; set; }
+    public int? AmpFreqKhz { get; set; }
     public bool? WakeOnLan { get; set; }
     public string? Mac { get; set; }
     public string? Firmware { get; set; }
@@ -70,7 +71,7 @@ public sealed class AmpState
     {
         Operate = null; FaultCode = null; BandCode = null; Antenna = null; AtuInline = null;
         Tuning = null; ForwardW = null; ReflectedW = null; InputW = null; DissipationW = null;
-        Swr = null; BypassSwr = null; TempC = null; Volts = null; Amps = null; Fan = null; FanMinimum = null;
+        Swr = null; BypassSwr = null; TempC = null; Volts = null; Amps = null; Fan = null; FanMinimum = null; AmpFreqKhz = null;
     }
 }
 
@@ -118,6 +119,16 @@ public sealed class AmpController : IAsyncDisposable
     private readonly TuneGuard _tune = new();
     private int _powerOnBusy;
 
+    // "No antenna?" check.
+    private readonly NoAntennaMonitor _noAnt = new();
+    private bool _noAntHold;          // amp put in STANDBY by the check (option "standby")
+    private NoAntState _noAntLast = NoAntState.Off;
+    private CancellationTokenSource? _scanCts;
+    private volatile bool _scanning;
+    private volatile string _scanStatus = "";
+
+    public NoAntennaMonitor NoAntenna => _noAnt;
+
     /// <summary>Raised (poll thread) when a new amp MAC is learned, so it can be saved.</summary>
     public event Action<string>? MacLearned;
 
@@ -136,6 +147,7 @@ public sealed class AmpController : IAsyncDisposable
         lock (_gate)
         {
             _cfg = cfg;
+            ApplyNoAntConfig(cfg);
             _wantOpen = cfg.AutoConnect && HasTarget(cfg);
             _state.Mac = cfg.AmpMac == "" ? null : cfg.AmpMac;
         }
@@ -157,6 +169,7 @@ public sealed class AmpController : IAsyncDisposable
             tciChanged = next.TciEnabled != _cfg.TciEnabled || next.TciHost != _cfg.TciHost ||
                          next.TciPort != _cfg.TciPort || next.TciReceiver != _cfg.TciReceiver;
             _cfg = next;
+            ApplyNoAntConfig(next);
             if (next.AmpMac != "") _state.Mac = next.AmpMac;
             if (reopen)
             {
@@ -169,17 +182,29 @@ public sealed class AmpController : IAsyncDisposable
         Wake();
     }
 
+    private void ApplyNoAntConfig(PluginConfig c)
+    {
+        _noAnt.Enabled = c.NoAntEnabled;
+        _noAnt.AutoLearn = c.NoAntAutoLearn;
+        _noAnt.BelowFloorDb = c.NoAntBelowFloorDb;
+        _noAnt.AboveEquipDb = c.NoAntAboveEquipDb;
+    }
+
+    private void OnRxLevel(double dbm) => _noAnt.AddLevel(dbm, DateTime.UtcNow);
+
     private void RestartTci(PluginConfig cfg)
     {
         var old = Interlocked.Exchange(ref _tci, null);
         if (old is not null)
         {
             old.Changed -= Wake;
+            old.RxLevel -= OnRxLevel;
             _ = old.DisposeAsync().AsTask();
         }
         if (!cfg.TciEnabled) return;
         var t = new TciClient(cfg.TciHost, cfg.TciPort, cfg.TciReceiver, Note);
         t.Changed += Wake;
+        t.RxLevel += OnRxLevel;
         _tci = t;
     }
 
@@ -429,6 +454,7 @@ public sealed class AmpController : IAsyncDisposable
         var os = await Q(link, "OS", ct).ConfigureAwait(false);
         var fl = await Q(link, "FL", ct).ConfigureAwait(false);
         var tp = await Q(link, "TP", ct).ConfigureAwait(false);
+        var fr = await Q(link, "FR", ct).ConfigureAwait(false);
         var meter = ws is null ? null : KpaProtocol.ParseWs(ws);
 
         var slow = new List<(string Cmd, string? Val)>();
@@ -458,6 +484,7 @@ public sealed class AmpController : IAsyncDisposable
             if (os is not null) _state.Operate = KpaProtocol.Bool01(os);
             if (fl is not null) _state.FaultCode = KpaProtocol.ParseFault(fl);
             if (tp is not null) _state.Tuning = KpaProtocol.Bool01(tp);
+            if (fr is not null) _state.AmpFreqKhz = KpaProtocol.Int(fr) is int k and > 0 ? k : null;
             foreach (var (cmd, val) in slow)
             {
                 if (val is null) continue;
@@ -519,7 +546,8 @@ public sealed class AmpController : IAsyncDisposable
             }
         }
 
-        await TrackRadioAsync(link, cfg, tx, ct).ConfigureAwait(false);
+        await StepNoAntennaAsync(link, cfg, tx, operate, fault, ct).ConfigureAwait(false);
+        if (!_scanning) await TrackRadioAsync(link, cfg, tx, ct).ConfigureAwait(false);
         return cfg.PollMs;
     }
 
@@ -578,6 +606,174 @@ public sealed class AmpController : IAsyncDisposable
             await link.SendAsync(KpaProtocol.SetFrequencyKhz(hz), ct).ConfigureAwait(false);
             _lastFreqSentKhz = khz;
             Note("freq", $"Frequency {khz / 1000.0:0.000} MHz sent to amp (^FR).");
+        }
+    }
+
+    // ── "No antenna?" check ────────────────────────────────────────────────
+
+    private bool _noAntRestore;       // the check put the amp in STANDBY and should restore OPERATE
+    private IRadioController? _radioController;
+
+    public bool NoAntHold => _noAntHold;
+    public bool Scanning => _scanning;
+    public string ScanStatus => _scanStatus;
+    public bool CanScan => _radioController is not null && _radio is not null;
+    public void SetRadioController(IRadioController? rc) => _radioController = rc;
+
+    public NoAntSnapshot GetNoAnt() => _noAnt.Snapshot(DateTime.UtcNow);
+
+    private async Task StepNoAntennaAsync(KpaLink link, PluginConfig cfg, bool tx, bool? operate, string? fault, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (!_scanning)
+        {
+            var (hz, _) = TrackHz;
+            var code = hz > 0 ? BandPlan.FromHz(hz) : -1;
+            _noAnt.SetBand(code >= 0 ? KpaProtocol.BandName(code) : null, now);
+        }
+        _noAnt.SetTx(tx, now);
+        var snap = _noAnt.Snapshot(now);
+        var st = snap.State;
+        if (st != _noAntLast)
+        {
+            switch (st)
+            {
+                case NoAntState.Low:
+                    if (_noAntLast != NoAntState.Tx)
+                        Note("warn", $"NO ANTENNA? Receive level {snap.Dbm:0} dBm on {snap.Band} is below the limit {snap.Limit} dBm. Check the antenna, or press DUMMY OK if a dummy load is connected.");
+                    break;
+                case NoAntState.Tx:
+                    Note("tx", $"WARNING: transmitting while NO ANTENNA? is showing (receive level was {snap.Dbm:0} dBm on {snap.Band}). Check the antenna / dummy load!");
+                    break;
+                case NoAntState.Ok when _noAntLast is NoAntState.Low or NoAntState.Tx or NoAntState.Dummy:
+                    Note("ok", $"Receive level back to normal on {snap.Band} ({snap.Dbm:0} dBm).");
+                    break;
+            }
+            _noAntLast = st;
+        }
+
+        var warn = cfg.NoAntEnabled && st is NoAntState.Low or NoAntState.Tx;
+        var holdWanted = warn && cfg.NoAntAction == "standby";
+        bool tuneIdle;
+        lock (_gate) tuneIdle = _tune.Phase == TunePhase.Idle;
+
+        if (holdWanted)
+        {
+            _noAntHold = true;
+            // Never switch the amp under RF; Standby-on-Tune has priority.
+            if (operate == true && !tx && tuneIdle)
+            {
+                await link.SendAsync(KpaProtocol.SetOperate(false), ct).ConfigureAwait(false);
+                lock (_gate) _state.Operate = false;
+                _noAntRestore = true;
+                Note("cmd", "NO ANTENNA? — amp put in STANDBY (^OS0;). It returns to OPERATE when a normal level comes back or you press DUMMY OK.");
+            }
+        }
+        else if (_noAntHold)
+        {
+            _noAntHold = false;
+            var faultActive = fault is not null && fault != "00";
+            if (_noAntRestore && !tx && tuneIdle && operate == false && !faultActive && cfg.NoAntEnabled)
+            {
+                await link.SendAsync(KpaProtocol.SetOperate(true), ct).ConfigureAwait(false);
+                lock (_gate) _state.Operate = true;
+                Note("cmd", "No-antenna hold released — amp back in OPERATE (^OS1;).");
+            }
+            _noAntRestore = false;
+        }
+    }
+
+    public (bool Ok, string Message) NoAntLearn(bool antennaConnected)
+    {
+        var r = _noAnt.LearnCurrent(antennaConnected, DateTime.UtcNow);
+        if (r.Ok) Note("info", r.Message);
+        return r;
+    }
+
+    public (bool Ok, string Message) NoAntDummy(bool on)
+    {
+        var r = _noAnt.SetDummy(on);
+        if (r.Ok) { Note("info", r.Message); Wake(); }
+        return r;
+    }
+
+    /// <summary>Middle of each band's phone segment (US), where the scan listens.</summary>
+    public static readonly IReadOnlyList<(string Band, long Hz)> ScanPlan = new[]
+    {
+        ("160m", 1_900_000L), ("80m", 3_800_000L), ("60m", 5_357_000L), ("40m", 7_212_000L),
+        ("30m", 10_125_000L), ("20m", 14_250_000L), ("17m", 18_140_000L), ("15m", 21_325_000L),
+        ("12m", 24_960_000L), ("10m", 28_500_000L), ("6m", 50_200_000L),
+    };
+
+    public CommandResult StartScan()
+    {
+        if (_radioController is not { } rc || _radio is not { } radio)
+            return CommandResult.Unavailable("Zeus did not give this feature permission to tune the radio, so the band scan is not available.");
+        if (!Config.NoAntEnabled) return CommandResult.Conflict("Turn the No-antenna check on first.");
+        if (Transmitting) return CommandResult.Conflict("Not while transmitting.");
+        if (_scanning) return CommandResult.Done("A scan is already running.");
+        var snap = _noAnt.Snapshot(DateTime.UtcNow);
+        if (!snap.LevelSeen)
+            return CommandResult.Conflict("No receive level from Zeus yet. Turn on TCI in Zeus and in this panel's settings first.");
+        _scanCts = CancellationTokenSource.CreateLinkedTokenSource(_cts?.Token ?? CancellationToken.None);
+        _scanning = true;
+        _scanStatus = "Starting…";
+        _ = Task.Run(() => ScanAsync(rc, radio.FrequencyHz, _scanCts.Token), CancellationToken.None);
+        return CommandResult.Accepted("Band scan started.");
+    }
+
+    public CommandResult StopScan()
+    {
+        _scanCts?.Cancel();
+        return CommandResult.Done("Stopping the scan…");
+    }
+
+    private async Task ScanAsync(IRadioController rc, long originalHz, CancellationToken ct)
+    {
+        var learned = new List<string>();
+        var stopped = "";
+        try
+        {
+            Note("info", "Band scan started: measuring the noise floor on each band (antenna connected).");
+            var bands = _noAnt.Bands;
+            foreach (var (band, hz) in ScanPlan)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!bands.TryGetValue(band, out var b) || b.Limit is null || b.Source == "manual") continue;
+                if (Transmitting) { stopped = "transmit started"; break; }
+                _scanStatus = $"Measuring {band}…";
+                await rc.SetFrequencyAsync(hz, ct).ConfigureAwait(false);
+                _noAnt.SetBand(band, DateTime.UtcNow);
+
+                double? level = null;
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(9);
+                var earliest = DateTime.UtcNow + NoAntennaMonitor.Settle + TimeSpan.FromSeconds(3);
+                while (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(250, ct).ConfigureAwait(false);
+                    if (Transmitting) break;
+                    if (DateTime.UtcNow >= earliest && _noAnt.CurrentMedian(DateTime.UtcNow) is { } m) { level = m; break; }
+                }
+                if (Transmitting) { stopped = "transmit started"; break; }
+                if (level is null) { stopped = $"no receive level from Zeus on {band}"; break; }
+                _noAnt.LearnFloor(band, level.Value, DateTime.UtcNow);
+                learned.Add($"{band} {level.Value:0}");
+            }
+        }
+        catch (OperationCanceledException) { stopped = "stopped by operator"; }
+        catch (Exception ex) { stopped = ex.Message; }
+        finally
+        {
+            try { await rc.SetFrequencyAsync(originalHz, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) { Note("warn", "Could not put the frequency back after the scan: " + ex.Message); }
+            _noAnt.SetBand(null, DateTime.UtcNow);   // re-read from the radio on the next pass
+            _scanning = false;
+            _scanStatus = stopped.Length == 0
+                ? $"Done: {learned.Count} band(s) learned."
+                : $"Stopped ({stopped}); {learned.Count} band(s) learned.";
+            Note(stopped.Length == 0 ? "ok" : "warn",
+                $"Band scan {(stopped.Length == 0 ? "finished" : "stopped: " + stopped)}. Noise floors (dBm): {(learned.Count == 0 ? "none" : string.Join(", ", learned))}. Frequency restored.");
+            Wake();
         }
     }
 
@@ -830,6 +1026,8 @@ public sealed class AmpController : IAsyncDisposable
             if (_tune.Phase != TunePhase.Idle)
                 return CommandResult.Conflict("Refused: TUNE in progress — the amp returns to its prior mode when TUNE ends (or press Cancel).");
         }
+        if (_noAntHold)
+            return CommandResult.Conflict("Refused: NO ANTENNA? is showing and the check keeps the amp in STANDBY. Check the antenna, or press DUMMY OK.");
         if (RelayBusy(out var why)) return CommandResult.Conflict(why);
         return await SendAsync(link, KpaProtocol.SetOperate(true), "OPERATE", ct).ConfigureAwait(false);
     }
