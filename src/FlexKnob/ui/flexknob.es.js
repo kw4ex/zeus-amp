@@ -65,7 +65,7 @@ const CSS = `
 .${ROOT} .${ROOT}__in{font-family:var(--font-mono);font-size:12px;background:var(--bg-inset);color:var(--fg-0);
   border:1px solid var(--line);border-radius:var(--r-xs);padding:4px 6px;min-height:28px;min-width:0;max-width:100%}
 .${ROOT} select.${ROOT}__in{font-family:var(--font-sans)}
-.${ROOT} .${ROOT}__fld{display:grid;grid-template-columns:minmax(110px,auto) 1fr;align-items:center;gap:6px}
+.${ROOT} .${ROOT}__fld{display:grid;grid-template-columns:minmax(110px,200px) minmax(0,1fr);align-items:center;gap:6px}
 .${ROOT} .${ROOT}__fld > label{color:var(--fg-1);font-size:12px}
 .${ROOT} .${ROOT}__chk{display:flex;align-items:center;gap:6px;color:var(--fg-0);font-size:12px;min-height:24px}
 .${ROOT} .${ROOT}__muted{font-size:12px;color:var(--fg-1)}
