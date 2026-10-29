@@ -49,6 +49,16 @@ Older versions are kept in numbered folders on the
 KPA1500 Thetis bridge (and Thetis) while Zeus is running. Standby on Tune and
 the receive-level features need **TCI switched on in Zeus** (port 40001).
 
+## No warranty — use at your own risk
+
+These add-ons are shared free by one radio operator, **as is**. There is **no
+warranty of any kind**: no promise that they work, that they are safe, or that
+they suit your equipment or purpose. Amplifiers, radios and antennas can be
+damaged, and RF can be dangerous. You are responsible for checking that they
+behave correctly with your own station, and for operating within your license.
+The author is not liable for any damage or loss. They are not made, approved or
+supported by Elecraft, FlexRadio or the Zeus project.
+
 ## For programmers
 
 Building, testing and packaging: [docs/DEVELOPERS.md](docs/DEVELOPERS.md).

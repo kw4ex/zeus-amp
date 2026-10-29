@@ -77,3 +77,15 @@ VFO B ●○● · Tuning step ●●○ · TX drive ●●●
 *Catalog note:* the Zeus community rules discourage features from talking to
 Zeus's own interfaces (TCI, its web API). Here they are the only route to
 these functions.
+
+## No warranty — use at your own risk
+
+This add-on is shared free by one radio operator, **as is**. There is **no
+warranty of any kind**: no promise that it works, that it is safe, or that
+it suits your equipment or purpose. Amplifiers, radios and antennas can be
+damaged, and RF can be dangerous. You are responsible for checking that they
+behaves correctly with your own station, and for operating within your license.
+The author is not liable for any damage or loss. It is not made, approved or
+supported by Elecraft, FlexRadio or the Zeus project.
+
+License: GPL-2.0-or-later (see the LICENSE file in the repository).

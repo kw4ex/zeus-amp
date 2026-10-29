@@ -63,3 +63,15 @@ TUNE flag. Three sources are offered; use any combination:
   that Zeus and the amp are on the same network.
 - *TCI WAIT*: Zeus's TCI server is off or on a different port.
 - Turn on **Event log** under Telemetry shown to see every command sent.
+
+## No warranty — use at your own risk
+
+This add-on is shared free by one radio operator, **as is**. There is **no
+warranty of any kind**: no promise that it works, that it is safe, or that
+it suits your equipment or purpose. Amplifiers, radios and antennas can be
+damaged, and RF can be dangerous. You are responsible for checking that they
+behaves correctly with your own station, and for operating within your license.
+The author is not liable for any damage or loss. It is not made, approved or
+supported by Elecraft, FlexRadio or the Zeus project.
+
+License: GPL-2.0-or-later (see the LICENSE file in the repository).
