@@ -1,78 +1,57 @@
-# zeus-kpa1500
+# KW4EX — Zeus SDR features
 
-Zeus SDR community feature for the **Elecraft KPA1500** amplifier and its
-built-in ATU. Operator guide: [`src/Kpa1500/README.md`](src/Kpa1500/README.md).
+Two add-ons ("community features") for **Zeus**, the SDR program for ANAN and
+other openHPSDR radios. They are written for operators, not programmers: you
+download one file and Zeus installs it.
 
-Behaviour is ported from the hardware-proven `kpa1500_thetis_bridge.py` v2.9:
-UDP on port 1500, `^FR` frequency tracking, Standby-on-Tune with a fresh mode
-read and confirmed restore, `^AMI`/`^AMB` ATU switching, Wake-on-LAN power-on,
-fan minimum control, and network discovery.
+| Feature | Latest | What it does |
+| --- | --- | --- |
+| **Elecraft KPA1500** | 1.1.9 | Meters and buttons for the KPA1500 amplifier and its ATU; the amp follows the VFO; Standby on Tune; "No antenna?" warning; power-on over the network. |
+| **FlexControl Knob** | 1.0.1 | Use the FlexRadio FlexControl USB tuning knob with Zeus: VFO tuning, AF volume, AGC gain and more, every press programmable. |
 
-## Layout
+## Download
 
-```
-src/Kpa1500/
-  Kpa1500Plugin.cs   Zeus entry point + HTTP API for the panel
-  AmpController.cs   link, poll loop, tracking, Standby-on-Tune, commands, safety
-  TuneGuard.cs       Standby-on-Tune state machine (pure, tested)
-  KpaProtocol.cs     ^…; formatting/parsing, fault table (pure, tested)
-  KpaLink.cs         one-command-in-flight request/response over a stream
-  Transports.cs      UDP (default) and USB serial
-  TciClient.cs       optional read-only TCI listener for tune/trx
-  NetTools.cs        Wake-on-LAN + discovery
-  PluginConfig.cs    settings, validation, sanitising
-  ui/kpa1500.es.js   panel (plain ESM, React.createElement, Zeus tokens only)
-  build-package.ps1  catalog packager, unmodified copy
-tests/Kpa1500.Tests  fake KPA1500 over loopback UDP + unit tests
-sdk/                 vendored Zeus plugin SDK snapshot (ABI 1 / 1.5.0) — do not edit
-docs/preview/        panel renders against a mock backend (not hardware screenshots)
-```
+Open the folder for the feature you want, click the file for your computer,
+then click the **download** button (↓, "Download raw file"). **Don't unzip it** —
+Zeus opens the `.zip` itself.
 
-## Build, test, package
+- **KPA1500:** [builds/latest](https://github.com/kw4ex/zeus-amp/tree/builds/latest)
+- **FlexControl Knob:** [builds/flexknob/latest](https://github.com/kw4ex/zeus-amp/tree/builds/flexknob/latest)
 
-Easiest: double-click **`BUILD.bat`** (Windows) or **`BUILD-mac.command`**
-(macOS), or run **`./BUILD-linux.sh`** (Linux). Each checks for the tools, builds, runs the tests, makes the ZIP, and
-writes everything to `build-log.txt`.
-
-| Computer | Install file |
+| Your computer | File name ends in |
 | --- | --- |
-| Windows | `com.kw4ex.zeus.kpa1500-1.1.9.zip` |
-| Mac with Apple silicon (M1–M4) | `com.kw4ex.zeus.kpa1500-1.1.9-osx-arm64.zip` |
-| Intel Mac | `com.kw4ex.zeus.kpa1500-1.1.9-osx-x64.zip` |
-| Linux PC (64-bit Intel/AMD) | `com.kw4ex.zeus.kpa1500-1.1.9-linux-x64.zip` |
-| Raspberry Pi 4/5 (64-bit OS) | `com.kw4ex.zeus.kpa1500-1.1.9-linux-arm64.zip` |
+| Windows PC | `-<version>.zip` (no extra word) |
+| Mac with Apple silicon (M1–M4) | `-osx-arm64.zip` |
+| Intel Mac | `-osx-x64.zip` |
+| Linux PC (64-bit) | `-linux-x64.zip` |
+| Raspberry Pi 4/5 (64-bit OS) | `-linux-arm64.zip` |
 
-The packages differ only in the bundled serial-port library (macOS adds
-`libSystem.IO.Ports.Native.dylib`, Linux `libSystem.IO.Ports.Native.so`); the
-UDP network connection is identical. `tools/package-unix.ps1` makes the macOS
-and Linux ones (`BUILD-mac.command` / `BUILD-linux.sh` wrap it). CI builds all
-five on every push and load-tests the Apple silicon, Linux x64 and Linux ARM64
-packages on matching machines.
+Older versions are kept in numbered folders on the
+[builds branch](https://github.com/kw4ex/zeus-amp/tree/builds).
 
-By hand — needs the .NET 10 SDK and PowerShell 7:
+## Install
 
-```powershell
-dotnet build Zeus.Kpa1500.slnx -c Release
-dotnet run --project tests/Kpa1500.Tests -c Release --no-build
-pwsh src/Kpa1500/build-package.ps1 -ManagedDependency System.IO.Ports.dll
-```
+1. In Zeus open **Features › Community › Install local feature**.
+2. Pick the `.zip` file you downloaded and click **Open**. A newer version
+   simply replaces the older one.
+3. Close and restart Zeus, then add the panel: **Add Panel › Amplifiers ›
+   KPA1500** or **Add Panel › Controls › FlexControl Knob**.
 
-The ZIP lands in `artifacts/<id>/`. Install it in Zeus with
-**Features → Community → Install local feature**. CI (`.github/workflows/ci.yml`)
-does all three on every push and attaches the ZIP to `v*` tag releases.
+## Instructions
 
-## Before publishing
+- **KPA1500:** [step-by-step guide (PDF)](docs/guides/KPA1500-for-Zeus-guide.pdf) —
+  what you need, install on Windows, Mac, Linux and Raspberry Pi, first-time
+  settings, what each button means, a safe first test and troubleshooting.
+  Short reference: [src/Kpa1500/README.md](src/Kpa1500/README.md).
+- **FlexControl Knob:** [src/FlexKnob/README.md](src/FlexKnob/README.md).
 
-- `global.json` currently allows any .NET 10 SDK so local builds are easy. The
-  catalog's rebuild check requires an exact pin with `"rollForward": "disable"`;
-  set that to the SDK you build the release with before submitting.
+**Important:** only one program should control the amplifier. Close the
+KPA1500 Thetis bridge (and Thetis) while Zeus is running. Standby on Tune and
+the receive-level features need **TCI switched on in Zeus** (port 40001).
 
-- Feature ID is `com.kw4ex.zeus.kpa1500` (author KW4EX). It is permanent once
-  listed; the `ROOT` class prefix at the top of the UI module must keep matching it.
-- Community catalog notes: the optional TCI listener connects to Zeus's own TCI
-  server, and the bundled `System.IO.Ports.dll` uses P/Invoke; both will draw
-  reviewer attention under the catalog's rules. USB serial is kept on purpose:
-  many stations reach the amp through a serial port or a virtual serial-port
-  emulator. Raise both with the maintainers. See the catalog's `CONTRIBUTING.md`.
+## For programmers
 
-License: GPL-2.0-or-later.
+Building, testing and packaging: [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
+
+License: GPL-2.0-or-later. "Elecraft", "KPA1500", "FlexRadio" and "FlexControl"
+are names of their owners; these are independent, community-made add-ons.
