@@ -31,7 +31,7 @@ docs/preview/        panel renders against a mock backend (not hardware screensh
 ## Build, test, package
 
 Easiest: double-click **`BUILD.bat`** (Windows) or **`BUILD-mac.command`**
-(macOS). Each checks for the tools, builds, runs the tests, makes the ZIP, and
+(macOS), or run **`./BUILD-linux.sh`** (Linux). Each checks for the tools, builds, runs the tests, makes the ZIP, and
 writes everything to `build-log.txt`.
 
 | Computer | Install file |
@@ -39,11 +39,15 @@ writes everything to `build-log.txt`.
 | Windows | `com.kw4ex.zeus.kpa1500-1.0.0.zip` |
 | Mac with Apple silicon (M1–M4) | `com.kw4ex.zeus.kpa1500-1.0.0-osx-arm64.zip` |
 | Intel Mac | `com.kw4ex.zeus.kpa1500-1.0.0-osx-x64.zip` |
+| Linux PC (64-bit Intel/AMD) | `com.kw4ex.zeus.kpa1500-1.0.0-linux-x64.zip` |
+| Raspberry Pi 4/5 (64-bit OS) | `com.kw4ex.zeus.kpa1500-1.0.0-linux-arm64.zip` |
 
-The packages differ only in the bundled serial-port library (the macOS ones add
-`libSystem.IO.Ports.Native.dylib`); the UDP network connection is identical.
-`tools/package-macos.ps1` makes the macOS ones; CI builds all three on every
-push and load-tests the Apple silicon package on a Mac.
+The packages differ only in the bundled serial-port library (macOS adds
+`libSystem.IO.Ports.Native.dylib`, Linux `libSystem.IO.Ports.Native.so`); the
+UDP network connection is identical. `tools/package-unix.ps1` makes the macOS
+and Linux ones (`BUILD-mac.command` / `BUILD-linux.sh` wrap it). CI builds all
+five on every push and load-tests the Apple silicon, Linux x64 and Linux ARM64
+packages on matching machines.
 
 By hand — needs the .NET 10 SDK and PowerShell 7:
 

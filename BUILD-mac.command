@@ -70,7 +70,7 @@ dotnet run --project tests/Kpa1500.Tests -c Release --no-build >> "$LOG" 2>&1 ||
 echo "        all tests passed."
 
 echo "  [5/5] Making the install ZIP for $RID..."
-pwsh -NoProfile -File tools/package-macos.ps1 -Rid "$RID" >> "$LOG" 2>&1 || fail
+pwsh -NoProfile -File tools/package-unix.ps1 -Rid "$RID" >> "$LOG" 2>&1 || fail
 echo "        done."
 
 echo

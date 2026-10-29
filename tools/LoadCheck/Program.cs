@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// CI check for the macOS package: load the unzipped feature into its own
+// CI check for the macOS and Linux packages: load the unzipped feature into its own
 // AssemblyLoadContext (the way a plugin host does, with no special native
-// library handling), then prove the bundled Mac serial implementation and its
+// library handling), then prove the bundled serial implementation and its
 // native helper load. Exit 0 = good. Never opens a real device.
 
 using System.Reflection;
@@ -10,7 +10,7 @@ using System.Runtime.Loader;
 
 if (args.Length != 1 || !Directory.Exists(args[0]))
 {
-    Console.WriteLine("usage: MacLoadCheck <unzipped package folder>");
+    Console.WriteLine("usage: LoadCheck <unzipped package folder>");
     return 2;
 }
 var dir = Path.GetFullPath(args[0]);
@@ -35,9 +35,9 @@ var names = (string[])transports.GetMethod("SerialPortNames")!.Invoke(null, null
 Report("serial port list", true, names.Length == 0 ? "(no ports on this machine)" : string.Join(", ", names));
 
 // Opening a port that does not exist must fail with an ordinary I/O error.
-// A DllNotFoundException / PlatformNotSupportedException would mean the Mac
+// A DllNotFoundException / PlatformNotSupportedException would mean the
 // serial implementation or its native library did not load.
-const string missing = "/dev/cu.kpa1500-loadcheck-missing";
+const string missing = "/dev/kpa1500-loadcheck-missing";
 try
 {
     transports.GetMethod("OpenSerial")!.Invoke(null, new object[] { missing, 38400 });
@@ -50,14 +50,14 @@ catch (TargetInvocationException tie)
     var bad = Contains<DllNotFoundException>(inner) || Contains<EntryPointNotFoundException>(inner) ||
               Contains<TypeInitializationException>(inner) || Contains<BadImageFormatException>(inner) ||
               inner.Message.Contains("not available in this build", StringComparison.Ordinal);
-    Report("Mac serial library and native helper load", !bad, chain + ": " + inner.Message);
+    Report("serial library and native helper load", !bad, chain + ": " + inner.Message);
 }
 
 var ports = alc.Assemblies.FirstOrDefault(a => a.GetName().Name == "System.IO.Ports");
 Report("System.IO.Ports came from the package", ports is not null &&
     Path.GetDirectoryName(ports.Location) == dir, ports?.Location ?? "not loaded");
 
-Console.WriteLine(failures == 0 ? "MAC LOAD CHECK PASSED" : $"MAC LOAD CHECK FAILED ({failures})");
+Console.WriteLine(failures == 0 ? "LOAD CHECK PASSED on " + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier : $"LOAD CHECK FAILED ({failures})");
 return failures == 0 ? 0 : 1;
 
 static bool Contains<T>(Exception? e) where T : Exception

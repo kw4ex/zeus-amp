@@ -1,22 +1,28 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Builds the macOS install ZIP(s) for the KPA1500 feature.
+# Builds the macOS and Linux install ZIPs for the KPA1500 feature.
 #
-#   pwsh tools/package-macos.ps1                 # both Apple silicon and Intel
-#   pwsh tools/package-macos.ps1 -Rid osx-arm64  # one of them
+#   pwsh tools/package-unix.ps1                   # all four
+#   pwsh tools/package-unix.ps1 -Rid linux-arm64  # just one (e.g. Raspberry Pi)
+#
+#   osx-arm64    Mac with Apple silicon (M1–M4)
+#   osx-x64      Intel Mac
+#   linux-x64    Linux PC (64-bit Intel/AMD)
+#   linux-arm64  Raspberry Pi 4/5 and other 64-bit ARM Linux
 #
 # It runs the catalog's unmodified src/Kpa1500/build-package.ps1 with the
-# macOS runtime selected (environment variable ZeusRid, read by the .csproj),
-# then adds the native serial helper libSystem.IO.Ports.Native.dylib to the
-# root of the ZIP, beside System.IO.Ports.dll, where .NET looks for it. The
-# UDP network connection needs neither file; they serve the serial option.
+# runtime selected (environment variable ZeusRid, read by the .csproj), then
+# adds the native serial helper (libSystem.IO.Ports.Native.dylib on macOS,
+# .so on Linux) to the root of the ZIP, beside System.IO.Ports.dll, where .NET
+# looks for it. The UDP network connection needs neither file; they serve the
+# serial option.
 #
 # Output: artifacts/<id>/<id>-<version>-<rid>.zip (+ .sha256)
 
 [CmdletBinding()]
 param(
-    [ValidateSet("osx-arm64", "osx-x64")]
-    [string[]] $Rid = @("osx-arm64", "osx-x64")
+    [ValidateSet("osx-arm64", "osx-x64", "linux-x64", "linux-arm64")]
+    [string[]] $Rid = @("osx-arm64", "osx-x64", "linux-x64", "linux-arm64")
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,9 +37,9 @@ $version = [string]$manifest.version
 $outDir = Join-Path $repo "artifacts/$id"
 $built = Join-Path $outDir "$id-$version.zip"
 $binDir = Join-Path $featureDir "bin/Release/net10.0"
-$nativeName = "libSystem.IO.Ports.Native.dylib"
 
 foreach ($r in $Rid) {
+    $nativeName = if ($r.StartsWith("osx")) { "libSystem.IO.Ports.Native.dylib" } else { "libSystem.IO.Ports.Native.so" }
     Write-Host "=== Building $id $version for $r"
     # Each runtime shares the same output folder, so start clean.
     foreach ($d in @("bin", "obj")) {

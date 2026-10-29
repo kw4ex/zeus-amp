@@ -82,24 +82,24 @@ jobs:
           gh release create "${{ github.ref_name }}" $files --title "${{ github.ref_name }}" --notes "Elecraft KPA1500 feature for Zeus. Download the file ending in .zip (not Source code) and install it in Zeus with Features > Community > Install local feature." @pre 2>$null
           if ($LASTEXITCODE -ne 0) { gh release upload "${{ github.ref_name }}" $files --clobber }
 
-  package-macos:
+  package-unix:
     needs: test
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - name: Package (Apple silicon and Intel)
+      - name: Package (macOS Apple silicon + Intel, Linux x64 + ARM64)
         shell: pwsh
-        run: ./tools/package-macos.ps1
+        run: ./tools/package-unix.ps1
       - name: Validate with the Zeus catalog tools
         shell: pwsh
         run: |
           $manifest = Get-Content src/Kpa1500/plugin.json -Raw | ConvertFrom-Json
           git clone --depth 1 https://github.com/Zeus-SDR/zeus-community-features "$env:RUNNER_TEMP/zeus"
-          $zips = Get-ChildItem "artifacts/$($manifest.id)" -Filter "*-osx-*.zip"
-          if ($zips.Count -ne 2) { throw "expected 2 macOS packages, found $($zips.Count)" }
+          $zips = Get-ChildItem "artifacts/$($manifest.id)" -Filter "*.zip" | Where-Object { $_.Name -match '-(osx|linux)-' }
+          if ($zips.Count -ne 4) { throw "expected 4 macOS/Linux packages, found $($zips.Count)" }
           Push-Location "$env:RUNNER_TEMP/zeus"
           foreach ($z in $zips) {
             ./tools/validate-package.ps1 `
@@ -111,29 +111,54 @@ jobs:
               -ManifestSchemaPath schema/plugin.schema.json
           }
           Pop-Location
-      - name: Load test on this Mac (plugin + Mac serial library load and list ports)
-        shell: pwsh
-        run: |
-          $manifest = Get-Content src/Kpa1500/plugin.json -Raw | ConvertFrom-Json
-          $zip = Get-ChildItem "artifacts/$($manifest.id)" -Filter "*-osx-arm64.zip" | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP "unzipped"
-          Expand-Archive $zip.FullName $dir -Force
-          Get-ChildItem $dir | Format-Table Name, Length
-          dotnet run --project tools/MacLoadCheck -c Release -- $dir
       - uses: actions/upload-artifact@v6
         with:
           name: kpa1500-package-macos
           path: artifacts/**/*-osx-*.zip*
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kpa1500-package-linux
+          path: artifacts/**/*-linux-*.zip*
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $files = Get-ChildItem artifacts -Recurse -Include *-osx-*.zip,*-osx-*.zip.sha256 | ForEach-Object FullName
+          $files = Get-ChildItem artifacts -Recurse -Include *-osx-*.zip*,*-linux-*.zip* | ForEach-Object FullName
           for ($i = 0; $i -lt 10; $i++) {
             gh release view "${{ github.ref_name }}" *> $null
             if ($LASTEXITCODE -eq 0) { break }
             Start-Sleep -Seconds 30
           }
           gh release upload "${{ github.ref_name }}" $files --clobber
+
+  load-check:
+    needs: package-unix
+    name: load check (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: osx-arm64,   os: macos-14,         artifact: kpa1500-package-macos }
+          - { rid: linux-x64,   os: ubuntu-24.04,     artifact: kpa1500-package-linux }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm, artifact: kpa1500-package-linux }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: pkg
+      - name: Load the ${{ matrix.rid }} package and its serial library on this machine
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem pkg -Recurse -Filter "*-${{ matrix.rid }}.zip" | Select-Object -First 1
+          if (-not $zip) { throw "package for ${{ matrix.rid }} not found" }
+          $dir = Join-Path $env:RUNNER_TEMP "unzipped"
+          Expand-Archive $zip.FullName $dir -Force
+          Get-ChildItem $dir | Format-Table Name, Length
+          dotnet run --project tools/LoadCheck -c Release -- $dir
