@@ -36,11 +36,11 @@ writes everything to `build-log.txt`.
 
 | Computer | Install file |
 | --- | --- |
-| Windows | `com.kw4ex.zeus.kpa1500-1.0.0.zip` |
-| Mac with Apple silicon (M1–M4) | `com.kw4ex.zeus.kpa1500-1.0.0-osx-arm64.zip` |
-| Intel Mac | `com.kw4ex.zeus.kpa1500-1.0.0-osx-x64.zip` |
-| Linux PC (64-bit Intel/AMD) | `com.kw4ex.zeus.kpa1500-1.0.0-linux-x64.zip` |
-| Raspberry Pi 4/5 (64-bit OS) | `com.kw4ex.zeus.kpa1500-1.0.0-linux-arm64.zip` |
+| Windows | `com.kw4ex.zeus.kpa1500-1.1.0.zip` |
+| Mac with Apple silicon (M1–M4) | `com.kw4ex.zeus.kpa1500-1.1.0-osx-arm64.zip` |
+| Intel Mac | `com.kw4ex.zeus.kpa1500-1.1.0-osx-x64.zip` |
+| Linux PC (64-bit Intel/AMD) | `com.kw4ex.zeus.kpa1500-1.1.0-linux-x64.zip` |
+| Raspberry Pi 4/5 (64-bit OS) | `com.kw4ex.zeus.kpa1500-1.1.0-linux-arm64.zip` |
 
 The packages differ only in the bundled serial-port library (macOS adds
 `libSystem.IO.Ports.Native.dylib`, Linux `libSystem.IO.Ports.Native.so`); the

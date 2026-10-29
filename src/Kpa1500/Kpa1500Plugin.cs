@@ -27,7 +27,7 @@ public sealed record OnRequest(bool On);
 public sealed class Kpa1500Plugin : IZeusPlugin, IBackendPlugin
 {
     /// <summary>Keep identical to plugin.json "version".</summary>
-    public const string ManifestVersion = "1.0.0";
+    public const string ManifestVersion = "1.1.0";
     private const string SettingsKey = "config";
 
     private IPluginContext? _ctx;
