@@ -103,6 +103,12 @@ const CSS = `
 .${ROOT} .${ROOT}__ntab td{padding:2px 4px;border-bottom:1px solid var(--line);color:var(--fg-0)}
 .${ROOT} .${ROOT}__ntab tr.${ROOT}__cur td{background:var(--bg-2)}
 .${ROOT} .${ROOT}__ntab input{width:72px}
+.${ROOT} .${ROOT}__ctl{display:flex;flex-direction:column;gap:6px}
+.${ROOT} .${ROOT}__cblock{display:flex;flex-direction:column;gap:4px}
+.${ROOT} .${ROOT}__ord{display:flex;flex-direction:column;gap:3px}
+.${ROOT} .${ROOT}__ordrow{display:flex;align-items:center;gap:6px;padding:2px 4px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-1)}
+.${ROOT} .${ROOT}__ordrow label{flex:1 1 auto;display:flex;align-items:center;gap:6px;color:var(--fg-0);font-size:12px}
+.${ROOT} .${ROOT}__ordrow .${ROOT}__b{padding:1px 7px;min-width:0}
 .${ROOT} .${ROOT}__compact .${ROOT}__glab{display:none}
 .${ROOT}.${ROOT}__compact{gap:5px;padding:6px}
 .${ROOT}.${ROOT}__compact .${ROOT}__meter{grid-template-columns:44px 1fr 52px}
@@ -133,6 +139,17 @@ async function call(callBackend, method, path, body) {
 const mhz = (khz) => khz == null ? "—" : (khz / 1000).toFixed(3) + " MHz";
 const SOURCE_TEXT = { "default": "default", "manual": "typed", "learned-floor": "learned (antenna)",
   "learned-equipment": "learned (no antenna)", "auto": "auto-learning" };
+const CONTROL_IDS = ["power", "operate", "tunestby", "antenna", "atu", "atutune", "band", "fan"];
+const CONTROL_NAMES = { power: "POWER", operate: "OPERATE / STANDBY", tunestby: "TUNE STBY (Standby on Tune)", antenna: "ANT 1 / ANT 2",
+  atu: "ATU in-line / bypass", atutune: "ATU TUNE", band: "Band buttons", fan: "Fan minimum speed" };
+const CONTROL_FLAG = { power: "ctlPower", operate: "ctlOperate", tunestby: "ctlTuneGuard", antenna: "ctlAntenna",
+  atu: "ctlAtu", atutune: "ctlTune", band: "ctlBand", fan: "ctlFan" };
+const controlOrder = (text) => {
+  const out = [];
+  String(text || "").split(",").forEach((x) => { const id = x.trim().toLowerCase(); if (CONTROL_IDS.includes(id) && !out.includes(id)) out.push(id); });
+  CONTROL_IDS.forEach((id) => { if (!out.includes(id)) out.push(id); });
+  return out;
+};
 const num = (v, d) => (v === null || v === undefined) ? "—" : (d === undefined ? String(v) : Number(v).toFixed(d));
 const tempText = (cdeg, unit) => cdeg == null ? "—"
   : unit === "F" ? Math.round(cdeg * 9 / 5 + 32) + " °F" : cdeg + " °C";
@@ -161,6 +178,28 @@ function Check(cfg, setCfg, key, label) {
   return h("label", { className: c("chk"), key },
     h("input", { type: "checkbox", checked: !!cfg[key], onChange: (e) => setCfg({ ...cfg, [key]: e.target.checked }) }),
     label);
+}
+
+// Settings list: one row per control with a show checkbox and ▲ / ▼ to move it.
+function ControlOrderEditor(draft, setDraft) {
+  const order = controlOrder(draft.controlOrder);
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= order.length) return;
+    const n = order.slice(); const t = n[i]; n[i] = n[j]; n[j] = t;
+    setDraft({ ...draft, controlOrder: n.join(",") });
+  };
+  return h("div", { className: c("ord"), key: "ord" },
+    order.map((id, i) => h("div", { key: id, className: c("ordrow") },
+      h("label", null,
+        h("input", { type: "checkbox", checked: !!draft[CONTROL_FLAG[id]],
+          onChange: (e) => setDraft({ ...draft, [CONTROL_FLAG[id]]: e.target.checked }) }),
+        (i + 1) + ". " + CONTROL_NAMES[id]),
+      h("button", { type: "button", className: c("b"), disabled: i === 0, "aria-label": "Move " + CONTROL_NAMES[id] + " up", onClick: () => move(i, -1) }, "▲"),
+      h("button", { type: "button", className: c("b"), disabled: i === order.length - 1, "aria-label": "Move " + CONTROL_NAMES[id] + " down", onClick: () => move(i, 1) }, "▼"))),
+    h("div", { className: c("btns") },
+      h("button", { type: "button", className: c("b"), onClick: () => setDraft({ ...draft, controlOrder: CONTROL_IDS.join(",") }) }, "Default order")),
+    draft.standbyOnTune ? null : h("div", { className: c("muted") }, "TUNE STBY only appears when Standby on Tune is ticked above."));
 }
 
 function Field(label, id, control) {
@@ -278,7 +317,7 @@ function makePanel(callBackend) {
     const hasTarget = cfg.transport === "serial" ? !!(cfg.serialPort || "").trim() : !!(cfg.host || "").trim();
     const tci = status.tci || { enabled: false };
 
-    // ── top-line buttons ──
+    // ── controls (all together, in the order chosen in Settings) ──
     // Every two-state control is one toggle that is filled (lit) when active.
     // Pairs/sets (ANT 1/2, bands) light the active one and fade the others.
     // Dashed outline = locked (transmitting / tuning / amp off), never "inactive".
@@ -286,9 +325,12 @@ function makePanel(callBackend) {
       className: c("b " + (opts.variant || "") + (opts.faint ? " faint" : "")),
       "aria-pressed": !!lit, disabled: !!opts.disabled, title: opts.title, onClick: opts.onClick }, label);
 
-    const ampBtns = [];
-    if (cfg.ctlPower) {
-      ampBtns.push(toggle("pw", amp.powerOnInProgress ? "WAKING…" : "POWER", on || amp.powerOnInProgress, {
+    const operating = on && amp.operate === true;
+    const armed = guard.phase !== "idle";
+    const inline = on && amp.atuInline === true;
+    // Each control: [shown?, inline buttons | block element]
+    const CONTROLS = {
+      power: () => cfg.ctlPower && [toggle("pw", amp.powerOnInProgress ? "WAKING…" : "POWER", on || amp.powerOnInProgress, {
         variant: "litok",
         disabled: !connected || busy || amp.powerOnInProgress || (on && (tx || tuning)),
         title: on ? (tx ? "Not while transmitting" : "Amplifier is ON — click to turn it off") : "Amplifier is off — click to turn it on",
@@ -296,16 +338,73 @@ function makePanel(callBackend) {
           const want = on ? "off" : "on";
           if ((want === "off" && cfg.confirmPowerOff) || (want === "on" && cfg.confirmPowerOn)) setConfirm(want);
           else act("/power", { on: want === "on" });
-        } }));
-    }
-    if (cfg.ctlOperate) {
-      const operating = on && amp.operate === true;
-      ampBtns.push(toggle("op", "OPERATE", operating, {
+        } })],
+      operate: () => cfg.ctlOperate && [toggle("op", "OPERATE", operating, {
         // Going to STANDBY is always allowed (even under RF); going to OPERATE is locked under RF.
         disabled: operating ? (!on || busy) : relayLock,
         title: !on ? "Amplifier is off" : operating ? "In OPERATE — click for STANDBY" : (lockTip || "In STANDBY — click for OPERATE"),
-        onClick: () => act("/operate", { operate: !operating }) }));
-    }
+        onClick: () => act("/operate", { operate: !operating }) })],
+      tunestby: () => cfg.standbyOnTune && cfg.ctlTuneGuard && [toggle("tg", "TUNE STBY", armed, {
+        variant: "litamber", disabled: !on || busy,
+        title: armed ? "Standby-on-Tune armed — click to cancel" : "Click, then press TUNE on the radio: the amp goes to STANDBY for the tune and back to OPERATE after",
+        onClick: () => act("/tune-guard", { arm: !armed }) })],
+      antenna: () => cfg.ctlAntenna && [1, 2].map((a) => {
+        const active = on && amp.antenna === a;
+        return toggle("a" + a, "ANT " + a, active, {
+          faint: on && amp.antenna != null && !active, disabled: relayLock && !active,
+          title: active ? "Antenna " + a + " in use" : (lockTip || "Switch to antenna " + a),
+          onClick: () => { if (!active) act("/antenna", { antenna: a }); } });
+      }),
+      atu: () => cfg.ctlAtu && [toggle("atu", "ATU", inline, {
+        disabled: relayLock,
+        title: lockTip || (inline ? "ATU in-line — click to bypass" : "ATU bypassed — click to put it in-line"),
+        onClick: () => act("/atu", { inline: !inline }) })],
+      atutune: () => cfg.ctlTune && [toggle("tn", tuning ? "TUNING…" : "ATU TUNE", tuning, {
+        variant: "litamber",
+        disabled: tuning ? busy : relayLock,
+        title: tuning ? "ATU is tuning — click to cancel" : (lockTip || "Start a full-search ATU tune (you supply the carrier)"),
+        onClick: () => tuning ? act("/atu/cancel") : setConfirm("tune") })],
+      band: () => {
+        if (!cfg.ctlBand) return null;
+        const radioText = status.radio && status.radio.available && status.radio.band
+          ? (status.radio.source || "Zeus") + ": " + status.radio.band + " · " + (status.radio.frequencyHz / 1000).toFixed(1) + " kHz"
+          : "Zeus radio state not available";
+        return h("div", { key: "band", className: c("cblock") },
+          h("div", { className: c("bands"), role: "group", "aria-label": "Amplifier band" },
+            BANDS.map((b) => {
+              const active = on && amp.band === b;
+              return toggle("bd" + b, b.replace("m", ""), active, {
+                faint: on && amp.band != null && !active, disabled: relayLock && !active,
+                title: active ? "Amp is on " + b : (lockTip || "Set the amp to " + b),
+                onClick: () => { if (!active) act("/band", { band: b }); } });
+            })),
+          h("div", { className: c("muted") }, radioText + (cfg.sendFrequency ? " · amp follows the VFO" : "")));
+      },
+      fan: () => {
+        if (!cfg.ctlFan) return null;
+        const fm = amp.fanMinimum;
+        return h("div", { key: "fan", className: c("row") },
+          h("span", { className: c("muted") }, "Fan minimum"),
+          h("button", { type: "button", className: c("b icon"), "aria-label": "Lower minimum fan speed", disabled: !on || busy || fm == null || fm <= 0,
+            onClick: () => act("/fan", { speed: fm - 1 }) }, "−"),
+          h("span", { className: c("mv"), "aria-live": "polite" }, fm == null ? "—" : String(fm)),
+          h("button", { type: "button", className: c("b icon"), "aria-label": "Raise minimum fan speed", disabled: !on || busy || fm == null || fm >= 5,
+            onClick: () => act("/fan", { speed: fm + 1 }) }, "+"),
+          h("span", { className: c("muted") }, "now " + (amp.fan == null ? "—" : amp.fan) + " / 5"));
+      },
+    };
+    // Consecutive buttons share one wrapping row; the band grid and fan are rows of their own.
+    const ctlRows = [];
+    let run = [];
+    const flush = () => { if (run.length) { ctlRows.push(h("div", { key: "r" + ctlRows.length, className: c("btns") }, run)); run = []; } };
+    controlOrder(cfg.controlOrder).forEach((id) => {
+      const el = CONTROLS[id] && CONTROLS[id]();
+      if (!el) return;
+      if (Array.isArray(el)) run = run.concat(el);
+      else { flush(); ctlRows.push(el); }
+    });
+    flush();
+    const controls = ctlRows.length ? h("div", { className: c("group ctl"), role: "group", "aria-label": "Amplifier controls" }, ctlRows) : null;
 
     // ── header ──
     const pills = [];
@@ -329,7 +428,7 @@ function makePanel(callBackend) {
           (amp.firmware ? " · fw " + amp.firmware : "") +
           (amp.band ? " · " + amp.band : "") +
           (on && amp.antenna ? " · ANT" + amp.antenna : ""))),
-      h("div", { className: c("row") }, pills, ampBtns,
+      h("div", { className: c("row") }, pills,
         h("button", { className: c("b icon"), type: "button", "aria-label": "Settings", title: "Settings", onClick: openSettings }, "⚙")));
 
     const banners = [];
@@ -449,73 +548,6 @@ function makePanel(callBackend) {
       meters.length ? h("div", { className: c("meters") }, meters) : null,
       tiles.length ? h("div", { className: c("tiles") }, tiles) : null) : null;
 
-    // ── controls ──
-    const groups = [];
-
-    if (cfg.ctlBand) {
-      const radioText = status.radio && status.radio.available && status.radio.band
-        ? (status.radio.source || "Zeus") + ": " + status.radio.band + " · " + (status.radio.frequencyHz / 1000).toFixed(1) + " kHz"
-        : "Zeus radio state not available";
-      groups.push(h("div", { key: "b", className: c("group") },
-        h("div", { className: c("glab") }, "Band" + (cfg.sendFrequency ? " · amp follows the VFO" : "")),
-        h("div", { className: c("bands"), role: "group", "aria-label": "Amplifier band" },
-          BANDS.map((b) => {
-            const active = on && amp.band === b;
-            return toggle("bd" + b, b.replace("m", ""), active, {
-              faint: on && amp.band != null && !active, disabled: relayLock && !active,
-              title: active ? "Amp is on " + b : (lockTip || "Set the amp to " + b),
-              onClick: () => { if (!active) act("/band", { band: b }); } });
-          })),
-        h("div", { className: c("muted") }, radioText)));
-    }
-
-    const showGuardBtn = cfg.standbyOnTune && cfg.ctlTuneGuard;
-    if (cfg.ctlAntenna || cfg.ctlAtu || cfg.ctlTune || showGuardBtn) {
-      const atuBtns = [];
-      if (cfg.ctlAntenna) [1, 2].forEach((a) => {
-        const active = on && amp.antenna === a;
-        atuBtns.push(toggle("a" + a, "ANT " + a, active, {
-          faint: on && amp.antenna != null && !active, disabled: relayLock && !active,
-          title: active ? "Antenna " + a + " in use" : (lockTip || "Switch to antenna " + a),
-          onClick: () => { if (!active) act("/antenna", { antenna: a }); } }));
-      });
-      if (cfg.ctlAtu) {
-        const inline = on && amp.atuInline === true;
-        atuBtns.push(toggle("atu", "ATU", inline, {
-          disabled: relayLock,
-          title: lockTip || (inline ? "ATU in-line — click to bypass" : "ATU bypassed — click to put it in-line"),
-          onClick: () => act("/atu", { inline: !inline }) }));
-      }
-      if (cfg.ctlTune) atuBtns.push(toggle("tn", tuning ? "TUNING…" : "ATU TUNE", tuning, {
-        variant: "litamber",
-        disabled: tuning ? busy : relayLock,
-        title: tuning ? "ATU is tuning — click to cancel" : (lockTip || "Start a full-search ATU tune (you supply the carrier)"),
-        onClick: () => tuning ? act("/atu/cancel") : setConfirm("tune") }));
-      if (showGuardBtn) {
-        const armed = guard.phase !== "idle";
-        atuBtns.push(toggle("tg", "TUNE STBY", armed, {
-          variant: "litamber", disabled: !on || busy,
-          title: armed ? "Standby-on-Tune armed — click to cancel" : "Click, then press TUNE on the radio: the amp goes to STANDBY for the tune and back to OPERATE after",
-          onClick: () => act("/tune-guard", { arm: !armed }) }));
-      }
-      groups.push(h("div", { key: "t", className: c("group") },
-        h("div", { className: c("glab") }, "Antenna & ATU"), h("div", { className: c("btns") }, atuBtns)));
-    }
-
-    if (cfg.ctlFan) {
-      const fm = amp.fanMinimum;
-      groups.push(h("div", { key: "fan", className: c("group") },
-        h("div", { className: c("glab") }, "Fan"),
-        h("div", { className: c("row") },
-          h("span", { className: c("muted") }, "Minimum speed"),
-          h("button", { type: "button", className: c("b icon"), "aria-label": "Lower minimum fan speed", disabled: !on || busy || fm == null || fm <= 0,
-            onClick: () => act("/fan", { speed: fm - 1 }) }, "−"),
-          h("span", { className: c("mv"), "aria-live": "polite" }, fm == null ? "—" : String(fm)),
-          h("button", { type: "button", className: c("b icon"), "aria-label": "Raise minimum fan speed", disabled: !on || busy || fm == null || fm >= 5,
-            onClick: () => act("/fan", { speed: fm + 1 }) }, "+"),
-          h("span", { className: c("muted") }, "now " + (amp.fan == null ? "—" : amp.fan) + " / 5"))));
-    }
-
     const logView = cfg.showLog ? h("div", { className: c("group") },
       h("div", { className: c("glab") }, "Event log"),
       h("div", { className: c("log"), role: "log", "aria-live": "off" },
@@ -558,7 +590,7 @@ function makePanel(callBackend) {
     }
 
     return h("div", { className: ROOT + (cfg.compact ? " " + c("compact") : ""), role: "region", "aria-label": "Elecraft KPA1500" },
-      header, banners, telemetry, groups, logView, overlay);
+      header, controls, banners, telemetry, logView, overlay);
   };
 }
 
@@ -756,17 +788,10 @@ function Settings(p) {
       Check(draft, setDraft, "showRxLevel", "Receive level (no-antenna check)"),
       Check(draft, setDraft, "showLog", "Event log")),
 
-    h("div", { className: c("glab") }, "Controls shown"),
+    h("div", { className: c("glab") }, "Controls at the top — tick to show, ▲▼ to arrange"),
+    ControlOrderEditor(draft, setDraft),
     h("div", { className: c("checks") },
-      Check(draft, setDraft, "ctlPower", "Power on/off"),
-      Check(draft, setDraft, "ctlOperate", "Operate / Standby"),
-      Check(draft, setDraft, "ctlTuneGuard", "Tune (STBY) button"),
-      Check(draft, setDraft, "ctlClearFault", "Clear fault"),
-      Check(draft, setDraft, "ctlBand", "Band select"),
-      Check(draft, setDraft, "ctlAntenna", "Antenna 1/2"),
-      Check(draft, setDraft, "ctlAtu", "ATU in-line / bypass"),
-      Check(draft, setDraft, "ctlTune", "ATU tune"),
-      Check(draft, setDraft, "ctlFan", "Fan minimum speed")),
+      Check(draft, setDraft, "ctlClearFault", "Clear-fault button (in the fault warning)")),
 
     h("div", { className: c("glab") }, "Display"),
     h("div", { className: c("checks") }, Check(draft, setDraft, "compact", "Compact layout")),

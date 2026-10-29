@@ -49,6 +49,9 @@ var magic = NetTools.BuildMagic("54:10:EC:14:75:22");
 Check("magic packet", magic.Length == 102 && magic[0] == 0xFF && magic[6] == 0x54 && magic[101] == 0x22);
 var badCfg = new PluginConfig { PollMs = 10, Transport = "tcp" }.Validate();
 Check("config validate", badCfg.Count == 2);
+Check("control order: unknown dropped, repeats removed, missing appended",
+    PluginConfig.NormalizeControlOrder("band, ANT,band,atu") == "band,atu,power,operate,tunestby,antenna,atutune,fan");
+Check("control order default is complete", PluginConfig.NormalizeControlOrder(null) == PluginConfig.DefaultControlOrder);
 if (badCfg.Count != 2) Console.WriteLine("::warning::config errors: " + string.Join(" | ", badCfg));
 Check("default config is valid", new PluginConfig().Validate().Count == 0);
 

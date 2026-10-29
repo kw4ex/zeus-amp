@@ -75,6 +75,24 @@ public sealed class PluginConfig
     public bool CtlTune { get; set; } = true;
     public bool CtlFan { get; set; }
 
+    /// <summary>Order of the controls at the top of the panel, comma separated.</summary>
+    public string ControlOrder { get; set; } = DefaultControlOrder;
+    public static readonly string[] ControlIds = { "power", "operate", "tunestby", "antenna", "atu", "atutune", "band", "fan" };
+    public const string DefaultControlOrder = "power,operate,tunestby,antenna,atu,atutune,band,fan";
+
+    /// <summary>Known ids only, no repeats, any missing ones appended in default order.</summary>
+    public static string NormalizeControlOrder(string? order)
+    {
+        var list = new List<string>();
+        foreach (var raw in (order ?? "").Split(','))
+        {
+            var id = raw.Trim().ToLowerInvariant();
+            if (Array.IndexOf(ControlIds, id) >= 0 && !list.Contains(id)) list.Add(id);
+        }
+        foreach (var id in ControlIds) if (!list.Contains(id)) list.Add(id);
+        return string.Join(',', list);
+    }
+
     // ── display ──
     public bool Compact { get; set; }
     public string TempUnit { get; set; } = "C";          // "C" | "F"
@@ -111,6 +129,7 @@ public sealed class PluginConfig
         if (!string.IsNullOrWhiteSpace(AmpMac) && NormalizeMac(AmpMac) == "") e.Add("MAC address must look like 54:10:EC:12:34:56.");
         if (WolPort is < 1 or > 65535) e.Add("Wake-on-LAN port must be 1–65535.");
         if (FrequencyStepKhz is < 1 or > 100) e.Add("Frequency step must be 1–100 kHz.");
+        if ((ControlOrder ?? "").Length > 200) e.Add("Control order is too long.");
         if ((TciHost ?? "").Length > 253) e.Add("TCI host is too long.");
         if (TciEnabled && string.IsNullOrWhiteSpace(TciHost)) e.Add("Enter the TCI host (usually 127.0.0.1).");
         if (TciPort is < 1 or > 65535) e.Add("TCI port must be 1–65535.");
@@ -154,6 +173,7 @@ public sealed class PluginConfig
         c.MeterMaxWatts = Math.Clamp(c.MeterMaxWatts, 100, 3000);
         c.SwrWarn = double.IsNaN(c.SwrWarn) ? d.SwrWarn : Math.Clamp(c.SwrWarn, 1.1, 10);
         c.TempWarnC = Math.Clamp(c.TempWarnC, 30, 100);
+        c.ControlOrder = NormalizeControlOrder(c.ControlOrder);
         return c;
     }
 }
