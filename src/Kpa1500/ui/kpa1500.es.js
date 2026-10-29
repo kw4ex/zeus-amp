@@ -284,7 +284,8 @@ function makePanel(callBackend) {
       conn.state === "opening" ? "OPENING" : "OFFLINE"));
     if (connected) pills.push(h("span", { key: "p", className: c("pill " + (on ? "ok" : amp.power === "off" ? "" : "warn")) },
       amp.powerOnInProgress ? "WAKING…" : on ? "ON" : amp.power === "off" ? "OFF" : "NO REPLY"));
-    if (tci.enabled) pills.push(h("span", { key: "tci", className: c("pill " + (tci.connected ? "ok" : "warn")), title: "TCI " + tci.target },
+    if (tci.enabled) pills.push(h("span", { key: "tci", className: c("pill " + (tci.connected ? "ok" : "warn")),
+      title: tci.connected ? "TCI connected to Zeus at " + tci.target : "TCI not connected: " + (tci.error || "connecting to " + tci.target) },
       tci.connected ? (tci.tune ? "TCI TUNE" : "TCI") : "TCI WAIT"));
     if (on && amp.operate != null) pills.push(h("span", { key: "o", className: c("pill " + (amp.operate ? "acc" : "")) }, amp.operate ? "OPERATE" : "STANDBY"));
     if (tx) pills.push(h("span", { key: "t", className: c("pill tx") }, "TX"));
@@ -402,6 +403,10 @@ function makePanel(callBackend) {
       tiles.push(Tile("Byp SWR", amp.bypassSwr == null ? "—" : num(amp.bypassSwr, 1) + ":1"));
     }
 
+    if (cfg.showRxLevel && cfg.tciEnabled && tci.enabled && !tci.connected) {
+      tiles.push(h("div", { key: "tciwhy", className: c("muted"), style: { gridColumn: "1 / -1" } },
+        "RX level needs Zeus's TCI: " + (tci.error || "connecting to " + tci.target + "…")));
+    }
     const telemetry = (meters.length || tiles.length) ? h("div", { className: c("group") },
       h("div", { className: c("glab") }, "Telemetry"),
       meters.length ? h("div", { className: c("meters") }, meters) : null,
@@ -533,7 +538,7 @@ function makePanel(callBackend) {
             h("button", { type: "button", className: c("b"), onClick: () => setConfirm(null) }, "Cancel"))));
     } else if (showSettings && draft) {
       overlay = h("div", { className: c("overlay"), style: { alignItems: "flex-start", overflow: "auto" } },
-        Settings({ draft, setDraft, ports, saveErr, connected, busy, found, mac: amp.mac, callBackend,
+        Settings({ draft, setDraft, ports, saveErr, connected, busy, found, mac: amp.mac, callBackend, tciStatus: tci,
           onFind: async () => {
             setFound({ searching: true });
             try { setFound(await call(callBackend, "POST", "/discover")); }
@@ -702,6 +707,11 @@ function Settings(p) {
       Field("TCI host", id("tciHost"), h("input", { id: id("tciHost"), className: c("in"), value: draft.tciHost, onChange: (e) => set("tciHost", e.target.value) })),
       Field("TCI port", id("tciPort"), numIn("tciPort", 1, 65535)),
       Field("TCI receiver", id("tciReceiver"), numIn("tciReceiver", 0, 7)),
+      h("div", { key: "tcist", className: c(p.tciStatus && p.tciStatus.connected ? "muted" : "err"), role: "status" },
+        !p.tciStatus || !p.tciStatus.enabled ? "TCI status: not started yet — click Save."
+          : p.tciStatus.connected ? "TCI status: connected to Zeus at " + p.tciStatus.target + "."
+          : "TCI status: not connected — " + (p.tciStatus.error || "trying " + p.tciStatus.target + "…") +
+            ". In Zeus's settings turn TCI on and use the same port here (Zeus's default is 40001)."),
     ] : null,
     Field("Tune button waits (s)", id("tuneTimeoutS"), numIn("tuneTimeoutS", 5, 120)),
 

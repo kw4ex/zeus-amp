@@ -146,7 +146,7 @@ public sealed class PluginConfig
         if (c.TciPort is < 1 or > 65535) c.TciPort = d.TciPort;
         c.TciReceiver = Math.Clamp(c.TciReceiver, 0, 7);
         c.TuneTimeoutS = Math.Clamp(c.TuneTimeoutS, 5, 120);
-        if (c.TciPort == 6060 && !c.TciEnabled) c.TciPort = d.TciPort;   // old wrong default
+        if (c.TciPort == 6060) c.TciPort = d.TciPort;   // old wrong default (Zeus uses 40001)
         if (c.NoAntAction is not ("warn" or "standby")) c.NoAntAction = d.NoAntAction;
         c.NoAntBelowFloorDb = Math.Clamp(c.NoAntBelowFloorDb, 1, 30);
         c.NoAntAboveEquipDb = Math.Clamp(c.NoAntAboveEquipDb, 1, 30);

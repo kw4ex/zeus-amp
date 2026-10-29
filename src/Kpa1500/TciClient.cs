@@ -69,6 +69,29 @@ public sealed class TciClient : IAsyncDisposable
 
     public string Target => $"{_host}:{_port}";
 
+    /// <summary>Why the last connection attempt failed, in plain words ("" when connected).</summary>
+    public string LastError { get; private set; } = "";
+
+    private string Explain(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.Net.Sockets.SocketException se)
+            {
+                return se.SocketErrorCode switch
+                {
+                    System.Net.Sockets.SocketError.ConnectionRefused =>
+                        $"nothing is listening at {Target}: TCI is off in Zeus, or Zeus uses a different port",
+                    System.Net.Sockets.SocketError.TimedOut or System.Net.Sockets.SocketError.HostUnreachable =>
+                        $"no answer from {Target}",
+                    _ => $"{se.SocketErrorCode} at {Target}",
+                };
+            }
+        }
+        if (ex is OperationCanceledException) return $"no answer from {Target} within 5 s";
+        return ex.Message;
+    }
+
     private async Task RunAsync(CancellationToken ct)
     {
         var warned = false;
@@ -84,6 +107,7 @@ public sealed class TciClient : IAsyncDisposable
                 }
                 _connected = true;
                 warned = false;
+                LastError = "";
                 _sensorsEx = false;
                 // Ask for receive-level reports every 250 ms (TCI spec §4.4).
                 var req = Encoding.ASCII.GetBytes("rx_sensors_enable:true,250;");
@@ -107,7 +131,9 @@ public sealed class TciClient : IAsyncDisposable
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
-                if (!_connected && !warned) { _note("warn", $"Waiting for TCI at {Target} ({ex.Message})."); warned = true; }
+                LastError = Explain(ex);
+                if (!_connected && !warned) { _note("warn", $"Waiting for TCI at {Target} ({LastError})."); warned = true; }
+                Changed?.Invoke();
             }
 
             if (_connected)
