@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "com.kw4ex.zeus.flexknob",
+  "name": "FlexControl Knob",
+  "version": "1.0.0",
+  "author": "KW4EX",
+  "description": "Use the FlexRadio FlexControl USB tuning knob with Zeus: VFO tuning with Zeus's step, AF volume, AGC gain, RIT/XIT, VFO B, tuning step and drive on the knob, and twelve assignable presses for mute, lock, split, NR/NB/ANF, band up/down, safe TUNE and Elecraft KPA1500 amplifier functions.",
+  "homepage": "https://github.com/kw4ex/zeus-amp",
+  "license": "GPL-2.0-or-later",
+  "sdk": {
+    "abi": 1,
+    "minVersion": "1.5.0"
+  },
+  "entrypoint": {
+    "assembly": "Zeus.Community.FlexKnob.dll",
+    "type": "Zeus.Community.FlexKnob.FlexKnobPlugin"
+  },
+  "capabilities": [
+    "ReadRadioState",
+    "ControlRadio",
+    "NetworkAccess",
+    "PersistSettings"
+  ],
+  "permissions": {
+    "network": true,
+    "fileSystemRead": false,
+    "fileSystemWrite": false
+  },
+  "ui": {
+    "modules": [
+      "ui/flexknob.es.js"
+    ],
+    "panels": [
+      {
+        "id": "flexknob.main",
+        "title": "FlexControl Knob",
+        "icon": "Disc",
+        "slot": "workspace.flexknob",
+        "category": "controls"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "dotnet": {
+    "project": "src/FlexKnob/Zeus.Community.FlexKnob.csproj",
+    "configuration": "Release"
+  },
+  "package": {
+    "plugin.json": "src/FlexKnob/plugin.json",
+    "README.md": "src/FlexKnob/README.md",
+    "LICENSE": "LICENSE",
+    "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+    "ui/flexknob.es.js": "src/FlexKnob/ui/flexknob.es.js"
+  }
+}

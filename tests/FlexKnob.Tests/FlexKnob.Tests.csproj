@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>FlexKnob.Tests</AssemblyName>
+    <RootNamespace>FlexKnob.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <!-- The feature's source is compiled straight into the test program (rather
+       than referencing the feature project, which is built for one specific
+       computer type) so the same tests run on Windows, Linux and macOS. -->
+  <ItemGroup>
+    <Compile Include="../../src/FlexKnob/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../sdk/Zeussdr.Zeus.Plugins.Contracts/Zeus.Plugins.Contracts.csproj" />
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+  </ItemGroup>
+</Project>

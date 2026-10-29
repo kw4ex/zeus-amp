@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Zeus.Community.FlexKnob</AssemblyName>
+    <RootNamespace>Zeus.Community.FlexKnob</RootNamespace>
+    <Version>1.0.0</Version>
+    <IsPackable>false</IsPackable>
+    <!-- Bundle System.IO.Ports beside the plugin for the FlexControl USB connection
+         (packaged with -ManagedDependency System.IO.Ports.dll). -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Which computer the package is for. A runtime identifier puts the right
+         serial-port implementation (and on macOS its native helper library)
+         flat in the output folder where the catalog packager looks for it.
+         Default win-x64; the Mac builds set the environment variable
+         ZeusRid=osx-arm64 (Apple silicon) or ZeusRid=osx-x64 (Intel).
+         Framework-dependent: Zeus supplies the runtime. The TCI and HTTP
+         connections are platform-neutral. -->
+    <ZeusRid Condition="'$(ZeusRid)' == ''">win-x64</ZeusRid>
+    <RuntimeIdentifier>$(ZeusRid)</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../sdk/Zeussdr.Zeus.Plugins.Contracts/Zeus.Plugins.Contracts.csproj"
+                      Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="FlexKnob.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

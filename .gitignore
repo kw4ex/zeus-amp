@@ -5,3 +5,4 @@ artifacts/
 *.user
 .vs/
 build-log.txt
+build-log-flexknob.txt

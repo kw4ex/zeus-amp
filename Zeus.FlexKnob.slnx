@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="sdk/Zeussdr.Zeus.Plugins.Contracts/Zeus.Plugins.Contracts.csproj" />
+  <Project Path="src/FlexKnob/Zeus.Community.FlexKnob.csproj" />
+  <Project Path="tests/FlexKnob.Tests/FlexKnob.Tests.csproj" />
+</Solution>
