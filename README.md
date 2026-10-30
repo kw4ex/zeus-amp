@@ -51,7 +51,7 @@ the receive-level features need **TCI switched on in Zeus** (port 40001).
 
 ## No warranty — use at your own risk
 
-These add-ons are shared free by one radio operator, **as is**. There is **no
+These add-ons are shared by one radio operator, **as is**. There is **no
 warranty of any kind**: no promise that they work, that they are safe, or that
 they suit your equipment or purpose. Amplifiers, radios and antennas can be
 damaged, and RF can be dangerous. You are responsible for checking that they
